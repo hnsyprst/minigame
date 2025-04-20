@@ -1,4 +1,7 @@
-use miniquad::*;
+use miniquad::{fs::{load_file, Response}, *};
+use resources::ResourceManager;
+mod ecs;
+mod resources;
 
 #[repr(C)]
 struct Vec2 {
@@ -42,13 +45,15 @@ impl Stage {
             BufferSource::slice(&indices),
         );
 
-        let pixels: [u8; 4 * 4 * 4] = [
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
-            0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF,
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0xFF,
-            0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        ];
+        let world = ecs::World::new();
+
+        let mut resource_manager = ResourceManager::new();
+        let texture = resource_manager.register_resource("/Users/joe/Documents/GitHub/minigame/src/grass.png");
+        resource_manager.load_resources();
+
+        // FIXME: This unwrap business is not good!
+        let image_bytes = resource_manager.get_resource_bytes(texture).unwrap().as_ref().unwrap();
+        let (_, pixels) = png_decoder::decode(image_bytes).unwrap();
         let texture = ctx.new_texture_from_data_and_format(
             &pixels,
             TextureParams {
@@ -58,8 +63,8 @@ impl Stage {
                 min_filter: FilterMode::Nearest,
                 mag_filter: FilterMode::Nearest,
                 mipmap_filter: MipmapFilterMode::None,
-                width: 4,
-                height: 4,
+                width: 32,
+                height: 32,
                 allocate_mipmaps: false,
                 sample_count: 1,
             },
@@ -113,6 +118,7 @@ impl EventHandler for Stage {
         self.ctx.begin_default_pass(Default::default());
 
         // Enforce aspect ratio
+        // TODO: Only bother doing this when the screen size changes
         let aspect_ratio: f32 = 4.0 / 3.0;
         let (screen_width, screen_height) = window::screen_size();
         let (viewport_height, viewport_width, pillarbox_height, pillarbox_width) = if screen_height * aspect_ratio >= screen_width {
