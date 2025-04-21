@@ -7,8 +7,8 @@ type ResourceId = u16;
 #[derive(Debug)]
 pub enum ResourceError {
     /// A Resource ID was out of bounds
-    OutOfBounds(Resource),
-    MiniquadFsError(Resource),
+    OutOfBounds,
+    MiniquadFsError,
 }
 
 #[derive(Debug)]
@@ -23,7 +23,10 @@ pub struct ResourceManager {
 }
 
 
-
+// FIXME: Always treating resources as Option is kind of silly
+// it would be better to just return Err if the resource isn't loaded;
+// its assumed that you'll call `load_resources()` before you start 
+// trying to interact with your resources
 impl ResourceManager {
     pub fn new() -> ResourceManager {
         ResourceManager {
@@ -43,47 +46,38 @@ impl ResourceManager {
         }
     }
 
-    pub fn get_resource_bytes(
+    pub fn get_as_bytes(
         &self,
-        resource: Resource,
+        resource: &Resource,
     ) -> Result<&Option<Vec<u8>>, ResourceError> {
         match self.resource_bytes.get(resource.id as usize) {
             Some(maybe_resource_bytes) => return Ok(maybe_resource_bytes),
-            None => return Err(ResourceError::OutOfBounds(resource)),
+            None => return Err(ResourceError::OutOfBounds),
         }
     }
 
-    fn get_resource_bytes_mut(
+    fn get_as_bytes_mut(
         &mut self,
-        resource: Resource,
+        resource: &Resource,
     ) -> Result<&mut Option<Vec<u8>>, ResourceError> {
         match self.resource_bytes.get_mut(resource.id as usize) {
             Some(maybe_resource_bytes) => return Ok(maybe_resource_bytes),
-            None => return Err(ResourceError::OutOfBounds(resource)),
+            None => return Err(ResourceError::OutOfBounds),
         }
     }
 
-    // fn load_callback(
-    //     &mut self,
-    //     resource: Resource,
-    //     maybe_bytes: Result<Vec<u8>, miniquad::fs::Error>
-    // ) {
-    //     // TODO: For now, we're just going to panic on any file load errors
-    //     let bytes = maybe_bytes.expect("miniquad file load error!");
-    //     let resource_bytes = self.get_resource_bytes_mut(resource).expect("Internal file load error!");
-    //     if resource_bytes.is_some() {
-    //         panic!("Tried to load into an already loaded resource!")
-    //     }
-
-    //     *resource_bytes = Some(bytes)
-
-
-    //     // let mut maybe_resource_bytes = self.get_resource_bytes_mut(resource).expect("Internal file load error!");
-    //     // match maybe_resource_bytes {
-    //     //     Some(resource_bytes) => panic!("Tried to load into an already loaded resource!"),
-    //     //     None => { maybe_resource_bytes = &Some(bytes) },
-    //     // }
-    // }
+    pub fn get_as_rgba8(
+        &self,
+        resource: &Resource,
+    ) -> Result<Option<Vec<u8>>, ResourceError> {
+        match self.get_as_bytes(resource)? {
+            Some(bytes) => {
+                let (_, pixels) = png_decoder::decode(bytes).unwrap();
+                Ok(Some(pixels))
+            }
+            None => return Ok(None),
+        }
+    }
 
     pub fn load_resources(&mut self) {
         let pending = Rc::new(RefCell::new(Vec::new()));
@@ -100,7 +94,8 @@ impl ResourceManager {
         
         while !self.resource_bytes.iter().all(| bytes | bytes.is_some()) {
             for (resource, maybe_bytes) in pending.borrow_mut().drain(..) {
-                let resource_bytes = self.get_resource_bytes_mut(resource).expect("Internal resource error");
+                // TODO: For now, we're just going to panic on any file load errors
+                let resource_bytes = self.get_as_bytes_mut(&resource).expect("Internal resource error");
                 if resource_bytes.is_some() { panic!("Tried to load into an already loaded resource!") };
                 let bytes = maybe_bytes.expect("File load error!");
                 *resource_bytes = Some(bytes);

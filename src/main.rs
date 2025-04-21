@@ -1,13 +1,13 @@
-use miniquad::{fs::{load_file, Response}, *};
-use resources::ResourceManager;
 mod ecs;
 mod resources;
+mod linalg;
+mod component;
+mod system;
 
-#[repr(C)]
-struct Vec2 {
-    x: f32,
-    y: f32,
-}
+use miniquad::{fs::{load_file, Response}, *};
+use resources::ResourceManager;
+use linalg::Vec2;
+
 #[repr(C)]
 struct Vertex {
     pos: Vec2,
@@ -16,9 +16,9 @@ struct Vertex {
 
 struct Stage {
     ctx: Box<dyn RenderingBackend>,
-
     pipeline: Pipeline,
     bindings: Bindings,
+    world: ecs::World,
 }
 
 impl Stage {
@@ -45,15 +45,15 @@ impl Stage {
             BufferSource::slice(&indices),
         );
 
-        let world = ecs::World::new();
-
+        // Load necessary resources
+        // Load player texture
         let mut resource_manager = ResourceManager::new();
-        let texture = resource_manager.register_resource("/Users/joe/Documents/GitHub/minigame/src/grass.png");
+        let texture_resource = resource_manager.register_resource("/Users/joe/Documents/GitHub/minigame/src/grass.png");
         resource_manager.load_resources();
 
         // FIXME: This unwrap business is not good!
-        let image_bytes = resource_manager.get_resource_bytes(texture).unwrap().as_ref().unwrap();
-        let (_, pixels) = png_decoder::decode(image_bytes).unwrap();
+        let pixels = resource_manager.get_as_rgba8(&texture_resource).unwrap().unwrap();
+
         let texture = ctx.new_texture_from_data_and_format(
             &pixels,
             TextureParams {
@@ -101,16 +101,25 @@ impl Stage {
             PipelineParams::default(),
         );
 
+        // Set up level
+        let mut world = ecs::World::new();
+
+        // Create player
+        let player = world.create_entity();
+        world.add_component_to_entity(&player, component::Transform { position: Vec2 { x: 5.0, y: 5.0 } } );
+        world.add_component_to_entity(&player, component::Sprite { texture: texture } );
+
         Stage {
             pipeline,
             bindings,
             ctx,
+            world,
         }
     }
 }
 
 impl EventHandler for Stage {
-    fn update(&mut self) {}
+    fn update(&mut self) { }
 
     fn draw(&mut self) {
         let t = date::now();

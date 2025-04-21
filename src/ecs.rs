@@ -1,4 +1,4 @@
-use std::any::TypeId;
+use std::{any::TypeId, collections::HashSet};
 
 use anymap::AnyMap;
 
@@ -8,19 +8,19 @@ type EntityGeneration = u64; // TODO: This is probably overkill, but saves havin
 #[derive(Debug)]
 pub enum EntityError {
     /// An Entity ID was out of bounds
-    OutOfBounds(Entity),
+    OutOfBounds,
     /// An Entity was invalid (either dead or its generation was outdated)
-    InvalidEntity(Entity),
+    InvalidEntity,
 }
 
 #[derive(Debug)]
 pub enum EntityComponentError {
     /// An Entity was invalid (either dead or its generation was outdated)
-    InvalidEntity(Entity),
+    InvalidEntity,
     /// An Entity did not have an expected component
-    MissingComponent(Entity, TypeId),
+    MissingComponent,
     /// A component was expected to be registered, but it was not
-    UnregisteredComponent(TypeId),
+    UnregisteredComponent,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -64,25 +64,34 @@ impl EntityAllocator {
         }
     }
 
-    pub fn deallocate(&mut self, entity: Entity) -> Result<(), EntityError> {
+    pub fn deallocate(
+        &mut self,
+        entity: Entity,
+    ) -> Result<(), EntityError> {
         match self.entries.get_mut(entity.id as usize) {
             Some(deallocated_entry) => {
                 deallocated_entry.is_live = false; // Mark this Entity as dead
                 self.available_entity_ids.push(entity.id); // Mark this Entity id as reusable
                 return Ok(())
             }
-            None => return Err(EntityError::OutOfBounds(entity))
+            None => return Err(EntityError::OutOfBounds)
         }
     }
     
-    pub fn is_alive(&self, entity: Entity) -> bool {
+    pub fn is_alive(
+        &self,
+        entity: &Entity,
+    ) -> bool {
         match self.entries.get(entity.id as usize) {
             Some(entry) => return entry.is_live,
             None => return false,
         }
     }
 
-    pub fn is_valid(&self, entity: Entity) -> bool {
+    pub fn is_valid(
+        &self,
+        entity: &Entity,
+    ) -> bool {
         match self.entries.get(entity.id as usize) {
             Some(entry) => {
                 // To be considered valid, the entity must be alive and of the current generation
@@ -143,8 +152,8 @@ impl World {
         // Won't error if the Entity is not alive, will just log
         match self.entity_allocator.deallocate(entity){
             Ok(()) => (),
-            Err(EntityError::OutOfBounds(_)) => println!("Error: tried to deallocate an Entity with an out-of-bounds ID!"),
-            Err(EntityError::InvalidEntity(_)) => println!("Error: tried to deallocate an invalid Entity!"),
+            Err(EntityError::OutOfBounds) => println!("Error: tried to deallocate an Entity with an out-of-bounds ID!"),
+            Err(EntityError::InvalidEntity) => println!("Error: tried to deallocate an invalid Entity!"),
         }
     }
 
@@ -161,38 +170,38 @@ impl World {
     pub fn get_component_pool<T: 'static>(&self) -> Result<&SparseSet<T>, EntityComponentError> {
         match self.components.get::<SparseSet<T>>() {
             Some(sparse_set) => return Ok(sparse_set),
-            None => Err(EntityComponentError::UnregisteredComponent(TypeId::of::<T>()))
+            None => Err(EntityComponentError::UnregisteredComponent)
         }
     }
 
     pub fn get_component_pool_mut<T: 'static>(&mut self) -> Result<&mut SparseSet<T>, EntityComponentError> {
         match self.components.get_mut::<SparseSet<T>>() {
             Some(sparse_set) => return Ok(sparse_set),
-            None => Err(EntityComponentError::UnregisteredComponent(TypeId::of::<T>()))
+            None => Err(EntityComponentError::UnregisteredComponent)
         }
     }
 
     pub fn get_all_instances_of_component<T: 'static>(&self) -> Result<&Vec<T>, EntityComponentError> {
         match self.components.get::<SparseSet<T>>() {
             Some(component_sparse_set) => return Ok(&component_sparse_set.components),
-            None => return Err(EntityComponentError::UnregisteredComponent(TypeId::of::<T>()))
+            None => return Err(EntityComponentError::UnregisteredComponent)
         }
     }
 
     pub fn get_all_instances_of_component_mut<T: 'static>(&mut self) -> Result<&mut Vec<T>, EntityComponentError> {
         match self.components.get_mut::<SparseSet<T>>() {
             Some(component_sparse_set) => return Ok(&mut component_sparse_set.components),
-            None => return Err(EntityComponentError::UnregisteredComponent(TypeId::of::<T>()))
+            None => return Err(EntityComponentError::UnregisteredComponent)
         }
     }
 
     pub fn entity_has_component<T: 'static>(
         &self,
-        entity: Entity,
+        entity: &Entity,
     ) -> Result<bool, EntityComponentError> {
         // First check if this entity is valid
         if !self.entity_allocator.is_valid(entity) {
-            return Err(EntityComponentError::InvalidEntity(entity));
+            return Err(EntityComponentError::InvalidEntity);
         }
         let component_pool = self.get_component_pool::<T>()?;
         Ok(component_pool.all_entities[entity.id as usize].is_some())
@@ -200,11 +209,11 @@ impl World {
 
     pub fn get_component_from_entity<T: 'static>(
         &self,
-        entity: Entity,
+        entity: &Entity,
     ) -> Result<Option<&T>, EntityComponentError> {
         // First check if this entity is valid
         if !self.entity_allocator.is_valid(entity) {
-            return Err(EntityComponentError::InvalidEntity(entity))
+            return Err(EntityComponentError::InvalidEntity)
         }
         let component_pool = self.get_component_pool::<T>()?;
         // We can access directly here (without get) because we are confident that the entity exists and is valid
@@ -217,11 +226,11 @@ impl World {
 
     pub fn get_component_from_entity_mut<T: 'static>(
         &mut self,
-        entity: Entity,
+        entity: &Entity,
     ) -> Result<Option<&T>, EntityComponentError> {
         // First check if this entity is valid
         if !self.entity_allocator.is_valid(entity) {
-            return Err(EntityComponentError::InvalidEntity(entity))
+            return Err(EntityComponentError::InvalidEntity)
         }
         let component_pool = self.get_component_pool_mut::<T>()?;
         // We can access directly here (without get) because we are confident that the entity exists and is valid
@@ -234,22 +243,22 @@ impl World {
 
     pub fn add_component_to_entity<T: 'static>(
         &mut self,
-        entity: Entity,
+        entity: &Entity,
         component: T,
     ) -> Result<(), EntityComponentError> {
         // First check if this entity is valid
         if !self.entity_allocator.is_valid(entity) {
-            return Err(EntityComponentError::InvalidEntity(entity))
+            return Err(EntityComponentError::InvalidEntity)
         }
         let component_pool = self.get_component_pool_mut::<T>()?;
         match component_pool.all_entities[entity.id as usize] {
             // If the value in sparse is Some, the Entity already has this component
             Some(_) => return Ok(()),
             None => {
-                component_pool.entities_with_component.push(entity);
+                component_pool.entities_with_component.push(entity.clone());
                 component_pool.components.push(component);
                 return Ok(())
             },
         }
-    }       
+    }
 }
