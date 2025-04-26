@@ -354,16 +354,29 @@ impl World {
 
     /// Get all Entities and components matching a given Query.
     /// See the Query trait and its implementations.
-    pub fn query<'a, Q: Query<'a>>(&'a self) -> impl Iterator<Item = (Entity, Q::QueryResult)> + 'a {
-        // TODO: Currently, this will iterate over all Entities. Try using Q::get_component_types with ComponentMap to
-        // get the component type in the query with the lowest number of components in its component pool,
-        // and iterate over that instead
-        (0..self.entity_allocator.get_num_entries())
-            .filter_map(| id | { self.entity_allocator.get_entity_from_id(&(id as EntityId))})  // FIXME: Not great, allocating an Entity every time
+    pub fn query<'a, Q: Query<'a>>(&'a self) -> impl Iterator<Item = (&'a Entity, Q::QueryResult)> {
+        // Get all Entities from the component pool in the query with the fewest components
+        let entities_with_component = Q::get_component_types()
+            .into_iter()
+            .map(| type_id | {
+                let entities_with_component = self.component_pools.map
+                    .get(&type_id)
+                    .unwrap()
+                    .get_entities_with_component();
+                (entities_with_component, entities_with_component.len())
+            })
+            .min_by_key(| &(_, length) | length)
+            .map(| (entities_with_component, _) | { entities_with_component });
+        
+        // Execute the query over the Entities gathered above
+        entities_with_component
+            .map(|entities| entities.iter()) // Cast the &Vec<Entity> to Iter<Entity>
+            // If `entities_with_component` is None, there were no components in any of the queried pools, so iterate over an empty slice
+            .unwrap_or_else(|| [].iter())
             .filter_map(| entity | {
                 Q::execute(self, &entity)
                 .map(| query_result | (entity, query_result))
-            }) 
+            })
     }
 
     pub fn add_component<T: 'static>(
@@ -419,7 +432,7 @@ impl <'a, A: 'static> Query<'a> for &'a A {
     type QueryResult = &'a A;
 
     fn get_component_types() -> Vec<TypeId> {
-        vec![TypeId::of::<A>()]
+        vec![TypeId::of::<ComponentPool<A>>()]
     }
 
     fn execute(
@@ -443,7 +456,7 @@ impl <'a, A: 'static, B: 'static> Query<'a> for (&'a A, &'a B) {
     type QueryResult = (&'a A, &'a B);
 
     fn get_component_types() -> Vec<TypeId> {
-        vec![TypeId::of::<A>(), TypeId::of::<B>()]
+        vec![TypeId::of::<ComponentPool<A>>(), TypeId::of::<ComponentPool<B>>()]
     }
 
     fn execute(
