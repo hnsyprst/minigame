@@ -4,9 +4,10 @@ mod linalg;
 mod component;
 mod system;
 
-use miniquad::{fs::{load_file, Response}, *};
+use miniquad::*;
 use resources::ResourceManager;
 use linalg::Vec2;
+use system::movement_system;
 
 #[repr(C)]
 struct Vertex {
@@ -72,7 +73,7 @@ impl Stage {
 
         let bindings = Bindings {
             vertex_buffers: vec![vertex_buffer],
-            index_buffer: index_buffer,
+            index_buffer,
             images: vec![texture],
         };
 
@@ -103,11 +104,20 @@ impl Stage {
 
         // Set up level
         let mut world = ecs::World::new();
+        world.register_component::<component::Transform>();
+        world.register_component::<component::Sprite>();
+        world.register_component::<component::PlayerControl>();
 
         // Create player
         let player = world.create_entity();
-        world.add_component_to_entity(&player, component::Transform { position: Vec2 { x: 5.0, y: 5.0 } } );
-        world.add_component_to_entity(&player, component::Sprite { texture: texture } );
+        world.add_component(&player, component::Transform { position: Vec2 { x: 5.0, y: 5.0 } } );
+        world.add_component(&player, component::Sprite { texture } );
+        world.add_component(&player, component::PlayerControl { } );
+
+        let enemy = world.create_entity();
+        world.add_component(&enemy, component::Transform { position: Vec2 { x: 10.0, y: 2.0 } } );
+        world.add_component(&enemy, component::PlayerControl { } );
+        world.add_component(&enemy, component::Sprite { texture } );
 
         Stage {
             pipeline,
@@ -119,7 +129,9 @@ impl Stage {
 }
 
 impl EventHandler for Stage {
-    fn update(&mut self) { }
+    fn update(&mut self) {
+        movement_system(&mut self.world);
+    }
 
     fn draw(&mut self) {
         let t = date::now();

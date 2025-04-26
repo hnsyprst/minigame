@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use miniquad::fs::load_file;
 
@@ -16,7 +16,6 @@ pub struct Resource {
     pub id: ResourceId,
 }
 
-/// 
 pub struct ResourceManager {
     resource_bytes: Vec<Option<Vec<u8>>>,
     resources_to_load: Vec<String>,
@@ -51,8 +50,8 @@ impl ResourceManager {
         resource: &Resource,
     ) -> Result<&Option<Vec<u8>>, ResourceError> {
         match self.resource_bytes.get(resource.id as usize) {
-            Some(maybe_resource_bytes) => return Ok(maybe_resource_bytes),
-            None => return Err(ResourceError::OutOfBounds),
+            Some(maybe_resource_bytes) => Ok(maybe_resource_bytes),
+            None => Err(ResourceError::OutOfBounds),
         }
     }
 
@@ -61,8 +60,8 @@ impl ResourceManager {
         resource: &Resource,
     ) -> Result<&mut Option<Vec<u8>>, ResourceError> {
         match self.resource_bytes.get_mut(resource.id as usize) {
-            Some(maybe_resource_bytes) => return Ok(maybe_resource_bytes),
-            None => return Err(ResourceError::OutOfBounds),
+            Some(maybe_resource_bytes) => Ok(maybe_resource_bytes),
+            None => Err(ResourceError::OutOfBounds),
         }
     }
 
@@ -75,7 +74,7 @@ impl ResourceManager {
                 let (_, pixels) = png_decoder::decode(bytes).unwrap();
                 Ok(Some(pixels))
             }
-            None => return Ok(None),
+            None => Ok(None),
         }
     }
 
