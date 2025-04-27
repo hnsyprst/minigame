@@ -2,6 +2,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use miniquad::fs::load_file;
 
+use crate::linalg::u32;
+
 type ResourceId = u16;
 
 #[derive(Debug)]
@@ -68,10 +70,24 @@ impl ResourceManager {
     pub fn get_as_rgba8(
         &self,
         resource: &Resource,
+        texture_size: &u32::Vec2,
     ) -> Result<Option<Vec<u8>>, ResourceError> {
         match self.get_as_bytes(resource)? {
             Some(bytes) => {
-                let (_, pixels) = png_decoder::decode(bytes).unwrap();
+                // Decode png as rgba8
+                let (_, mut pixels) = png_decoder::decode(bytes).unwrap();
+
+                // png-decoder decodes the image flipped, so flip it
+                let row_length = texture_size.x as usize * 4; // 4 u8s per pixel (rgba8)
+                for y in 0..texture_size.y as usize / 2 {
+                    let top_index = y * row_length;
+                    let bottom_index = (texture_size.y as usize - 1 - y) * row_length;
+
+                    let (top_slice, bottom_slice) = pixels.split_at_mut(bottom_index);
+                    top_slice[top_index..top_index + row_length].swap_with_slice(
+                        &mut bottom_slice[..row_length],
+                    );
+                }
                 Ok(Some(pixels))
             }
             None => Ok(None),
@@ -100,6 +116,5 @@ impl ResourceManager {
                 *resource_bytes = Some(bytes);
             }
         }
-
     }
 }

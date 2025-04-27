@@ -6,15 +6,15 @@ mod system;
 
 use miniquad::*;
 use resources::ResourceManager;
-use linalg::Vec2;
+use linalg::{f32, u32};
 use system::{movement_system, render_system};
 
 const MAX_SPRITES: usize = 16;
 
 #[repr(C)]
 struct Vertex {
-    pos: Vec2,
-    uv: Vec2,
+    pos: f32::Vec2,
+    uv: f32::Vec2,
 }
 
 struct Stage {
@@ -30,10 +30,10 @@ impl Stage {
 
         #[rustfmt::skip]
         let vertices: [Vertex; 4] = [
-            Vertex { pos : Vec2 { x: -0.5, y: -0.5 }, uv: Vec2 { x: 0., y: 0. } },
-            Vertex { pos : Vec2 { x:  0.5, y: -0.5 }, uv: Vec2 { x: 0.5, y: 0. } },
-            Vertex { pos : Vec2 { x:  0.5, y:  0.5 }, uv: Vec2 { x: 0.5, y: 0.5 } },
-            Vertex { pos : Vec2 { x: -0.5, y:  0.5 }, uv: Vec2 { x: 0., y: 0.5 } },
+            Vertex { pos : f32::Vec2 { x: -0.5, y: -0.5 }, uv: f32::Vec2 { x: 0., y: 0. } },
+            Vertex { pos : f32::Vec2 { x:  0.5, y: -0.5 }, uv: f32::Vec2 { x: 0.5, y: 0. } },
+            Vertex { pos : f32::Vec2 { x:  0.5, y:  0.5 }, uv: f32::Vec2 { x: 0.5, y: 0.5 } },
+            Vertex { pos : f32::Vec2 { x: -0.5, y:  0.5 }, uv: f32::Vec2 { x: 0., y: 0.5 } },
         ];
         let vertex_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
@@ -51,13 +51,13 @@ impl Stage {
         let instance_uv_offsets_buffer = ctx.new_buffer(
             BufferType::VertexBuffer, 
             BufferUsage::Stream, 
-            BufferSource::empty::<Vec2>(MAX_SPRITES),
+            BufferSource::empty::<f32::Vec2>(MAX_SPRITES),
         );
 
         let instance_positions_buffer = ctx.new_buffer(
             BufferType::VertexBuffer, 
             BufferUsage::Stream, 
-            BufferSource::empty::<Vec2>(MAX_SPRITES),
+            BufferSource::empty::<f32::Vec2>(MAX_SPRITES),
         );
 
         // Load necessary resources
@@ -67,7 +67,12 @@ impl Stage {
         resource_manager.load_resources();
 
         // FIXME: This unwrap business is not good!
-        let pixels = resource_manager.get_as_rgba8(&texture_resource).unwrap().unwrap();
+        let texture_atlas_size = u32::Vec2 { x: 32, y: 32 };
+        let sprite_size = u32::Vec2 { x: 16, y: 16 };
+        let pixels = resource_manager.get_as_rgba8(
+            &texture_resource,
+            &texture_atlas_size,
+        ).unwrap().unwrap();
 
         let texture = ctx.new_texture_from_data_and_format(
             &pixels,
@@ -78,8 +83,8 @@ impl Stage {
                 min_filter: FilterMode::Nearest,
                 mag_filter: FilterMode::Nearest,
                 mipmap_filter: MipmapFilterMode::None,
-                width: 32,
-                height: 32,
+                width: texture_atlas_size.x,
+                height: texture_atlas_size.y,
                 allocate_mipmaps: false,
                 sample_count: 1,
             },
@@ -140,17 +145,24 @@ impl Stage {
         world.register_component::<component::Transform>();
         world.register_component::<component::Sprite>();
         world.register_component::<component::PlayerControl>();
+        world.register_component::<component::TextureAtlas>();
+
+        // Create texture atlas
+        // TODO: Explicitly link this to `texture`
+        let texture_atlas = world.create_entity();
+        world.add_component(&texture_atlas, component::TextureAtlas::new( texture_atlas_size, sprite_size ));
 
         // Create player
         let player = world.create_entity();
-        world.add_component(&player, component::Transform { position: Vec2 { x: 0.1, y: 0.2 } } );
-        world.add_component(&player, component::Sprite { atlas_id: 0 } );
+        world.add_component(&player, component::Transform { position: f32::Vec2 { x: 0.1, y: 0.2 } } );
+        world.add_component(&player, component::Sprite { texture_atlas, atlas_sprite_index: u32::Vec2 { x: 0, y: 0 } } );
         world.add_component(&player, component::PlayerControl { } );
 
+        // Create enemy
         let enemy = world.create_entity();
-        world.add_component(&enemy, component::Transform { position: Vec2 { x: 0.5, y: 0.7 } } );
+        world.add_component(&enemy, component::Transform { position: f32::Vec2 { x: 0.5, y: 0.7 } } );
         world.add_component(&enemy, component::PlayerControl { } );
-        world.add_component(&enemy, component::Sprite { atlas_id: 1 } );
+        world.add_component(&enemy, component::Sprite { texture_atlas, atlas_sprite_index: u32::Vec2 { x: 0, y: 1 } } );
 
         Stage {
             pipeline,
@@ -201,8 +213,7 @@ mod shader {
     void main() {
         gl_Position = vec4(in_pos + in_instance_pos, 0, 1);
         texcoord = in_uv + in_instance_uv_offset;
-        // TODO: Currently flipping sprites in the shader (not great!) lets just flip them on resource load
-        texcoord = vec2(texcoord.x, 1.0 - texcoord.y);
+        texcoord = vec2(texcoord.x, texcoord.y);
     }"#;
 
     pub const FRAGMENT: &str = r#"#version 100

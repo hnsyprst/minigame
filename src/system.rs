@@ -1,6 +1,6 @@
 use miniquad::{date, window, Bindings, BufferSource, Pipeline, RenderingBackend, UniformsSource};
 
-use crate::{component::{PlayerControl, Sprite, Transform}, ecs::World, linalg::Vec2, shader};
+use crate::{component::{PlayerControl, Sprite, TextureAtlas, Transform}, ecs::World, linalg::f32, shader};
 
 pub fn movement_system(world: &mut World) {
     let mut t = date::now() * 0.3;
@@ -11,22 +11,35 @@ pub fn movement_system(world: &mut World) {
     }
 }
 
+pub fn sprite_lookup_system(
+    world: &World,
+    sprite: &Sprite,
+) -> Option<f32::Vec2> {
+    let atlas = world.get_component_mut::<TextureAtlas>(&sprite.texture_atlas).ok()??;
+    // If sprite is out of bounds, return None
+    if sprite.atlas_sprite_index.x > atlas.num_textures.x || sprite.atlas_sprite_index.y > atlas.num_textures.y {
+        return None
+    }
+    Some(f32::Vec2 {
+        x: atlas.uv_step.x * sprite.atlas_sprite_index.x as f32,
+        y: atlas.uv_step.y * sprite.atlas_sprite_index.y as f32,
+    })
+}
+
 pub fn render_system(
     world: &World,
     ctx: &mut Box<dyn RenderingBackend>,
     bindings: &Bindings,
     pipeline: &Pipeline,
 ) {
-    let positions: Vec<Vec2> = world.query::<(&Transform, &Sprite)>()
-        .map(| (entity, (transform, sprite)) | {
-            transform.position
+    let (positions, uv_offsets): (Vec<f32::Vec2>, Vec<f32::Vec2>) = world.query::<(&Transform, &Sprite)>()
+        .map(| (_, (transform, sprite)) | {
+            (
+                transform.position,
+                sprite_lookup_system(world, &sprite).unwrap_or(f32::Vec2 { x: 0., y: 0. }) // Use default texture on lookup error
+            )
         })
         .collect();
-
-    let uv_offsets: Vec<Vec2> = vec![ 
-        Vec2 { x: 0., y: 0. },
-        Vec2 { x: 0., y: 0.5 },
-    ];
 
     ctx.buffer_update(
         bindings.vertex_buffers[1],
