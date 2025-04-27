@@ -8,5 +8,5 @@ pub struct Transform {
 
 pub struct Sprite {
     // TODO: Implement a texture atlas
-    pub texture: miniquad::TextureId,
+    pub atlas_id: i8,
 }
