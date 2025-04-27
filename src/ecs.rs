@@ -1,4 +1,4 @@
-use std::{any::{Any, TypeId}, collections::{HashMap}};
+use std::{any::{Any, TypeId}, cell::{Ref, RefCell, RefMut}, collections::HashMap};
 
 type EntityId = u16;
 type EntityGeneration = u64; // TODO: This is probably overkill, but saves having to check if we've run out of generations. Make a choice later!
@@ -118,16 +118,6 @@ impl EntityAllocator {
             }
         }
     }
-
-    /// If the Entity with this id is alive, get a new instance of it. Otherwise, get None
-    pub fn get_entity_from_id(
-        &self,
-        id: &EntityId,
-    ) -> Option<Entity> {
-        let candidate_entity_generation = self.entries.get(*id as usize)?.generation;
-        let candidate_entity = Entity { id: *id, generation: candidate_entity_generation };
-        if self.is_alive( &candidate_entity ) { Some(candidate_entity) } else { None }
-    }
     
     pub fn get_num_entries(&self) -> usize {
         self.entries.len()
@@ -186,7 +176,7 @@ impl<T: 'static> ComponentStorage for ComponentPool<T> {
 /// Supports `ComponentStorage` behaviours (e.g., registering a new Entity)
 /// without downcasting to a ComponentPool with a concrete <T>.
 struct ComponentMap {
-    map: HashMap<TypeId, Box<dyn ComponentStorage>>,
+    map: HashMap<TypeId, RefCell<Box<dyn ComponentStorage>>>,
 }
 
 impl ComponentMap {
@@ -196,44 +186,68 @@ impl ComponentMap {
         }
     }
 
-    fn insert<T> (
+    fn insert<T>(
         &mut self,
         value: T,
     ) 
     where
         T: ComponentStorage + Any + 'static
     {
-        self.map.insert(TypeId::of::<T>(), Box::new(value));
+        self.map.insert(TypeId::of::<T>(), RefCell::new(Box::new(value)));
     }
 
-    /// Get an object with type T (will downcast).
-    /// To avoid downcasting, try:
-    /// ```
-    /// self.map.get(&TypeId::of::<T>())
-    /// ```
-    fn get_typed<T> (&self) -> Option<&T>
+    fn get<T>(&self) -> Option<Ref<Box<dyn ComponentStorage>>>
     where
         T: ComponentStorage + Any + 'static
     {
-        let value = self.map.get(&TypeId::of::<T>())?;
-        value
-            .as_any()
-            .downcast_ref::<T>()
+        self.map
+            .get(&TypeId::of::<T>())
+            .map(| cell | {
+                cell.borrow()
+            })
+    }
+
+    fn get_mut<T>(&self) -> Option<RefMut<Box<dyn ComponentStorage>>>
+    where
+        T: ComponentStorage + Any + 'static
+    {
+        self.map
+            .get(&TypeId::of::<T>())
+            .map(| cell | {
+                cell.borrow_mut()
+            })
     }
 
     /// Get a mutable object with type T (will downcast).
     /// To avoid downcasting, try:
     /// ```
-    /// self.map.get_mut(&TypeId::of::<T>())
+    /// self.get::&TypeId::of::<T>()
     /// ```
-    fn get_typed_mut<T> (&mut self) -> Option<&mut T>
+    fn get_typed<T>(&self) -> Option<Ref<T>>
     where
         T: ComponentStorage + Any + 'static
     {
-        let value = self.map.get_mut(&TypeId::of::<T>())?;
-        value
-            .as_any_mut()
-            .downcast_mut::<T>()
+        Ref::filter_map(self.get::<T>()?, | boxed | {
+            boxed
+                .as_any()
+                .downcast_ref::<T>()
+        }).ok()
+    }
+
+    /// Get a mutable object with type T (will downcast).
+    /// To avoid downcasting, try:
+    /// ```
+    /// self.get_mut::&TypeId::of::<T>()
+    /// ```
+    fn get_typed_mut<T>(&self) -> Option<RefMut<T>>
+    where
+        T: ComponentStorage + Any + 'static
+    {
+        RefMut::filter_map(self.get_mut::<T>()?, | boxed | {
+            boxed
+                .as_any_mut()
+                .downcast_mut::<T>()
+        }).ok()
     }
 }
 
@@ -258,7 +272,7 @@ impl World {
         self.component_pools.map
             .iter_mut()
             .for_each(| (_, component_storage) | {
-                component_storage.register_entity(&entity);
+                component_storage.borrow_mut().register_entity(&entity);
             });
         entity
     }
@@ -288,30 +302,16 @@ impl World {
         );
     }
 
-    fn get_component_pool<T: 'static>(&self) -> Result<&ComponentPool<T>, EntityComponentError> {
+    fn get_component_pool<T: 'static>(&self) -> Result<Ref<ComponentPool<T>>, EntityComponentError> {
         match self.component_pools.get_typed::<ComponentPool<T>>() {
             Some(pool) => Ok(pool),
             None => Err(EntityComponentError::UnregisteredComponent)
         }
     }
 
-    fn get_component_pool_mut<T: 'static>(&mut self) -> Result<&mut ComponentPool<T>, EntityComponentError> {
+    fn get_component_pool_mut<T: 'static>(&self) -> Result<RefMut<ComponentPool<T>>, EntityComponentError> {
         match self.component_pools.get_typed_mut::<ComponentPool<T>>() {
             Some(pool) => Ok(pool),
-            None => Err(EntityComponentError::UnregisteredComponent)
-        }
-    }
-
-    fn get_all_instances_of_component<T: 'static>(&self) -> Result<&Vec<T>, EntityComponentError> {
-        match self.component_pools.get_typed::<ComponentPool<T>>() {
-            Some(pool) => Ok(&pool.components),
-            None => Err(EntityComponentError::UnregisteredComponent)
-        }
-    }
-
-    fn get_all_instances_of_component_mut<T: 'static>(&mut self) -> Result<&mut Vec<T>, EntityComponentError> {
-        match self.component_pools.get_typed_mut::<ComponentPool<T>>() {
-            Some(pool) => Ok(&mut pool.components),
             None => Err(EntityComponentError::UnregisteredComponent)
         }
     }
@@ -321,7 +321,7 @@ impl World {
     fn get_component<T: 'static>(
         &self,
         entity: &Entity,
-    ) -> Result<Option<&T>, EntityComponentError> {
+    ) -> Result<Option<Ref<T>>, EntityComponentError> {
         // First check if this entity is valid
         if !self.entity_allocator.is_valid(entity) {
             return Err(EntityComponentError::InvalidEntity)
@@ -330,15 +330,19 @@ impl World {
         // We can access directly here (without get) because we are confident that the entity exists and is valid
         match component_pool.all_entities[entity.id as usize] {
             // If the value in all_entities is Some, we have our index for the component!
-            Some(dense_data_index) => Ok(Some(&component_pool.components[dense_data_index])),
+            Some(dense_data_index) => Ok({
+                Ref::filter_map(component_pool, | pool_ref | {
+                    Some(&pool_ref.components[dense_data_index])
+                }).ok()
+            }),
             None => Ok(None),
         }
     }
 
     pub fn get_component_mut<T: 'static>(
-        &mut self,
+        &self,
         entity: &Entity,
-    ) -> Result<Option<&T>, EntityComponentError> {
+    ) -> Result<Option<RefMut<T>>, EntityComponentError> {
         // First check if this entity is valid
         if !self.entity_allocator.is_valid(entity) {
             return Err(EntityComponentError::InvalidEntity)
@@ -347,40 +351,78 @@ impl World {
         // We can access directly here (without get) because we are confident that the entity exists and is valid
         match component_pool.all_entities[entity.id as usize] {
             // If the value in all_entities is Some, we have our index for the component!
-            Some(dense_data_index) => Ok(Some(&component_pool.components[dense_data_index])),
+            // Some(dense_data_index) => Ok(Some(&mut component_pool.components[dense_data_index])),
+            Some(dense_data_index) => Ok({
+                RefMut::filter_map(component_pool, | pool_ref_mut | {
+                    Some(&mut pool_ref_mut.components[dense_data_index])
+                }).ok()
+            }),
             None => Ok(None),
         }
     }
 
-    /// Get all Entities and components matching a given Query.
+    /// Get Entities and references to components matching a given Query.
     /// See the Query trait and its implementations.
-    pub fn query<'a, Q: Query<'a>>(&'a self) -> impl Iterator<Item = (&'a Entity, Q::QueryResult)> {
+    pub fn query<'a, Q: Query<'a>>(&'a self) -> impl Iterator<Item = (Entity, Q::QueryResult)> {
         // Get all Entities from the component pool in the query with the fewest components
         let entities_with_component = Q::get_component_types()
             .into_iter()
             .map(| type_id | {
-                let entities_with_component = self.component_pools.map
+                self.component_pools.map
                     .get(&type_id)
-                    .unwrap()
-                    .get_entities_with_component();
-                (entities_with_component, entities_with_component.len())
+                    .map(| cell | {
+                        let entities_with_this_component = cell
+                            .borrow()
+                            .get_entities_with_component()
+                            .clone();
+                        (entities_with_this_component.len(), entities_with_this_component)
+                    })
+                    .unwrap() // TODO: Handle errors properly---this is going to panic on unregistered component
             })
-            .min_by_key(| &(_, length) | length)
-            .map(| (entities_with_component, _) | { entities_with_component });
-        
-        // Execute the query over the Entities gathered above
+            .min_by_key(| &(length, _) | length)
+            .map(|(_, entities_with_component)| entities_with_component)
+            .unwrap_or_else(Vec::new); // If all `entities_with_this_component` were empty, there is no smallest one---so just get an empty Vec
+            
         entities_with_component
-            .map(|entities| entities.iter()) // Cast the &Vec<Entity> to Iter<Entity>
-            // If `entities_with_component` is None, there were no components in any of the queried pools, so iterate over an empty slice
-            .unwrap_or_else(|| [].iter())
+            .into_iter()
             .filter_map(| entity | {
-                Q::execute(self, &entity)
-                .map(| query_result | (entity, query_result))
+                    Q::execute(self, &entity)
+                        .map(| query_result | { (entity, query_result) })
+                })
+    }
+
+    /// Get Entities and mutable references to components matching a given Query.
+    /// See the Query trait and its implementations.
+    pub fn query_mut<'a, Q: Query<'a>>(&'a self) -> impl Iterator<Item = (Entity, Q::QueryResultMut)> {
+        // Get all Entities from the component pool in the query with the fewest components
+        let entities_with_component = Q::get_component_types()
+            .into_iter()
+            .map(| type_id | {
+                self.component_pools.map
+                    .get(&type_id)
+                    .map(| cell | {
+                        let entities_with_this_component = cell
+                            .borrow()
+                            .get_entities_with_component()
+                            .clone();
+                        (entities_with_this_component.len(), entities_with_this_component)
+                    })
+                    .unwrap() // TODO: Handle errors properly---this is going to panic on unregistered component
             })
+            .min_by_key(| &(length, _) | length)
+            .map(|(_, entities_with_component)| entities_with_component)
+            .unwrap_or_else(Vec::new); // If all `entities_with_this_component` were empty, there is no smallest one---so just get an empty Vec
+            
+        entities_with_component
+            .into_iter()
+            .filter_map(| entity | {
+                    Q::execute_mut(self, &entity)
+                        .map(| query_result | { (entity, query_result) })
+                })
     }
 
     pub fn add_component<T: 'static>(
-        &mut self,
+        &self,
         entity: &Entity,
         component: T,
     ) -> Result<(), EntityComponentError> {
@@ -388,7 +430,7 @@ impl World {
         if !self.entity_allocator.is_valid(entity) {
             return Err(EntityComponentError::InvalidEntity)
         }
-        let component_pool = self.get_component_pool_mut::<T>()?;
+        let mut component_pool = self.get_component_pool_mut::<T>()?;
         match component_pool.all_entities[entity.id as usize] {
             // If the value in `all_entities` is Some, the Entity already has this component
             Some(_) => {
@@ -412,11 +454,13 @@ impl World {
 /// See World::register_component.
 pub trait Query<'a> {
     type QueryResult;
+    type QueryResultMut;
 
     /// Returns all component types involved in this query.
     fn get_component_types() -> Vec<TypeId>;
     /// Execute the query for this Entity, maybe returning component(s).
     fn execute(world: &'a World, entity: &Entity) -> Option<Self::QueryResult>;
+    fn execute_mut(world: &'a World, entity: &Entity) -> Option<Self::QueryResultMut>;
 }
 
 /// Get all Entities that have the component A.
@@ -429,7 +473,8 @@ pub trait Query<'a> {
 ///     })
 /// ```
 impl <'a, A: 'static> Query<'a> for &'a A {
-    type QueryResult = &'a A;
+    type QueryResult = Ref<'a, A>;
+    type QueryResultMut = RefMut<'a, A>;
 
     fn get_component_types() -> Vec<TypeId> {
         vec![TypeId::of::<ComponentPool<A>>()]
@@ -440,6 +485,13 @@ impl <'a, A: 'static> Query<'a> for &'a A {
         entity: &Entity,
     ) -> Option<Self::QueryResult> {
         world.get_component::<A>(entity).expect("Invalid entity, or component was not registered!")
+    }
+
+    fn execute_mut(
+        world: &'a World,
+        entity: &Entity,
+    ) -> Option<Self::QueryResultMut> {
+        world.get_component_mut::<A>(entity).expect("Invalid entity, or component was not registered!")
     }
 }
 
@@ -453,7 +505,8 @@ impl <'a, A: 'static> Query<'a> for &'a A {
 ///     })
 /// ```
 impl <'a, A: 'static, B: 'static> Query<'a> for (&'a A, &'a B) {
-    type QueryResult = (&'a A, &'a B);
+    type QueryResult = (Ref<'a, A>, Ref<'a, B>);
+    type QueryResultMut = (RefMut<'a, A>, RefMut<'a, B>);
 
     fn get_component_types() -> Vec<TypeId> {
         vec![TypeId::of::<ComponentPool<A>>(), TypeId::of::<ComponentPool<B>>()]
@@ -465,6 +518,15 @@ impl <'a, A: 'static, B: 'static> Query<'a> for (&'a A, &'a B) {
     ) -> Option<Self::QueryResult> {
         let component_a = world.get_component::<A>(entity).expect("Invalid entity, or component was not registered!")?;
         let component_b = world.get_component::<B>(entity).expect("Invalid entity, or component was not registered!")?;
+        Some((component_a, component_b))
+    }
+
+    fn execute_mut(
+        world: &'a World,
+        entity: &Entity,
+    ) -> Option<Self::QueryResultMut> {
+        let component_a = world.get_component_mut::<A>(entity).expect("Invalid entity, or component was not registered!")?;
+        let component_b = world.get_component_mut::<B>(entity).expect("Invalid entity, or component was not registered!")?;
         Some((component_a, component_b))
     }
 }

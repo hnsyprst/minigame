@@ -7,7 +7,7 @@ mod system;
 use miniquad::*;
 use resources::ResourceManager;
 use linalg::Vec2;
-use system::movement_system;
+use system::{movement_system, render_system};
 
 #[repr(C)]
 struct Vertex {
@@ -46,6 +46,12 @@ impl Stage {
             BufferSource::slice(&indices),
         );
 
+        let instance_positions_buffer = ctx.new_buffer(
+            BufferType::VertexBuffer, 
+            BufferUsage::Stream, 
+            BufferSource::empty::<Vec2>(16),
+        );
+
         // Load necessary resources
         // Load player texture
         let mut resource_manager = ResourceManager::new();
@@ -72,7 +78,7 @@ impl Stage {
         );
 
         let bindings = Bindings {
-            vertex_buffers: vec![vertex_buffer],
+            vertex_buffers: vec![vertex_buffer, instance_positions_buffer],
             index_buffer,
             images: vec![texture],
         };
@@ -93,10 +99,17 @@ impl Stage {
             .unwrap();
 
         let pipeline = ctx.new_pipeline(
-            &[BufferLayout::default()],
             &[
-                VertexAttribute::new("in_pos", VertexFormat::Float2),
-                VertexAttribute::new("in_uv", VertexFormat::Float2),
+                BufferLayout::default(),
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    ..Default::default()
+                },
+            ],
+            &[
+                VertexAttribute::with_buffer("in_pos", VertexFormat::Float2, 0),
+                VertexAttribute::with_buffer("in_uv", VertexFormat::Float2, 0),
+                VertexAttribute::with_buffer("in_instance_pos", VertexFormat::Float2, 1),
             ],
             shader,
             PipelineParams::default(),
@@ -110,12 +123,12 @@ impl Stage {
 
         // Create player
         let player = world.create_entity();
-        world.add_component(&player, component::Transform { position: Vec2 { x: 5.0, y: 5.0 } } );
+        world.add_component(&player, component::Transform { position: Vec2 { x: 0.1, y: 0.2 } } );
         world.add_component(&player, component::Sprite { texture } );
         world.add_component(&player, component::PlayerControl { } );
 
         let enemy = world.create_entity();
-        world.add_component(&enemy, component::Transform { position: Vec2 { x: 10.0, y: 2.0 } } );
+        world.add_component(&enemy, component::Transform { position: Vec2 { x: 0.5, y: 0.7 } } );
         world.add_component(&enemy, component::PlayerControl { } );
         world.add_component(&enemy, component::Sprite { texture } );
 
@@ -134,37 +147,8 @@ impl EventHandler for Stage {
     }
 
     fn draw(&mut self) {
-        let t = date::now();
-
-        self.ctx.begin_default_pass(Default::default());
-
-        // Enforce aspect ratio
-        // TODO: Only bother doing this when the screen size changes
-        let aspect_ratio: f32 = 4.0 / 3.0;
-        let (screen_width, screen_height) = window::screen_size();
-        let (viewport_height, viewport_width, pillarbox_height, pillarbox_width) = if screen_height * aspect_ratio >= screen_width {
-            (screen_width / aspect_ratio, screen_width, (screen_height - screen_width / aspect_ratio) / 2.0, 0.0)
-        } else {
-            (screen_height, screen_height * aspect_ratio, 0.0, (screen_width - screen_height * aspect_ratio) / 2.0)
-        };
-        self.ctx.apply_viewport(
-            pillarbox_width.floor() as i32, pillarbox_height.floor() as i32, viewport_width.floor() as i32, viewport_height.floor() as i32
-        );
-
-        self.ctx.apply_pipeline(&self.pipeline);
-        self.ctx.apply_bindings(&self.bindings);
-        for i in 0..10 {
-            let t = t + i as f64 * 0.3;
-
-            self.ctx
-                .apply_uniforms(UniformsSource::table(&shader::Uniforms {
-                    offset: (t.sin() as f32 * 0.5, (t * 3.).cos() as f32 * 0.5),
-                }));
-            self.ctx.draw(0, 6, 1);
-        }
+        render_system(&self.world, &mut self.ctx, &self.bindings, &self.pipeline);
         self.ctx.end_render_pass();
-
-
         self.ctx.commit_frame();
     }
 }
@@ -187,13 +171,14 @@ mod shader {
     pub const VERTEX: &str = r#"#version 100
     attribute vec2 in_pos;
     attribute vec2 in_uv;
+    attribute vec2 in_instance_pos;
 
     uniform vec2 offset;
 
     varying lowp vec2 texcoord;
 
     void main() {
-        gl_Position = vec4(in_pos + offset, 0, 1);
+        gl_Position = vec4(in_pos + in_instance_pos, 0, 1);
         texcoord = in_uv;
     }"#;
 
@@ -218,8 +203,9 @@ mod shader {
 
     struct Vertex
     {
-        float2 in_pos   [[attribute(0)]];
-        float2 in_uv    [[attribute(1)]];
+        float2 in_pos           [[attribute(0)]];
+        float2 in_uv            [[attribute(1)]];
+        float2 in_instance_pos  [[attribute(2)]];
     };
 
     struct RasterizerData
@@ -234,7 +220,7 @@ mod shader {
     {
         RasterizerData out;
 
-        out.position = float4(v.in_pos.xy + uniforms.offset, 0.0, 1.0);
+        out.position = float4(v.in_pos.xy + uniforms.offset + v.in_instance_pos.xy, 0.0, 1.0);
         out.uv = v.in_uv;
 
         return out;
