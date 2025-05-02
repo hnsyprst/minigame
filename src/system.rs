@@ -1,10 +1,43 @@
-use miniquad::{date, window, Bindings, BufferSource, Pipeline, RenderingBackend, UniformsSource};
+use std::collections::HashSet;
 
-use crate::{component::{PlayerControl, Sprite, TextureAtlas, Transform}, ecs::World, linalg::f32, shader};
+use miniquad::{date, window, Bindings, BufferSource, KeyCode, Pipeline, RenderingBackend, UniformsSource};
 
-pub fn movement_system(world: &mut World) {
+use crate::{component::{EnemyControl, PlayerControl, Sprite, TextureAtlas, Transform}, ecs::World, linalg::{f32, Vector}, shader};
+
+pub fn player_movement_system(
+    world: &mut World,
+    pressed_keys: &HashSet<KeyCode>,
+) {
+    let mut movement_vec = f32::Vec2 { x: 0.0, y: 0.0 };
+    let speed = 0.01;
+
+    if pressed_keys.contains(&KeyCode::W) {
+        movement_vec.y += 1.0;
+    };
+    if pressed_keys.contains(&KeyCode::A) {
+        movement_vec.x -= 1.0;
+    };
+    if pressed_keys.contains(&KeyCode::S) {
+        movement_vec.y -= 1.0;
+    };
+    if pressed_keys.contains(&KeyCode::D) {
+        movement_vec.x += 1.0;
+    };
+
+    movement_vec = movement_vec.normalize();
+    movement_vec *= speed;
+
+    for (entity, (_player_control, mut transform)) in world.query_mut::<(&PlayerControl, &Transform)>() {
+        transform.position.x += movement_vec.x;
+        transform.position.y += movement_vec.y;
+    }
+}
+
+pub fn enemy_movement_system(
+    world: &mut World,
+) {
     let mut t = date::now() * 0.3;
-    for (entity, (player_control, mut transform)) in world.query_mut::<(&PlayerControl, &Transform)>() {
+    for (entity, (_enemy_control, mut transform)) in world.query_mut::<(&EnemyControl, &Transform)>() {
         t += entity.get_id() as f64;
         transform.position.x = t.sin() as f32 * 0.5;
         transform.position.y = (t * 3.).cos() as f32 * 0.5;
@@ -36,6 +69,8 @@ pub fn render_system(
         .map(| (_, (transform, sprite)) | {
             (
                 transform.position,
+                // TODO: Would be better to get all sprites with the same atlas and run the lookup over all of them at once
+                // rather than looking up the texture atlas over and over again
                 sprite_lookup_system(world, &sprite).unwrap_or(f32::Vec2 { x: 0., y: 0. }) // Use default texture on lookup error
             )
         })

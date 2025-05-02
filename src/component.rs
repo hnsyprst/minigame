@@ -26,6 +26,8 @@ impl TextureAtlas {
 
 pub struct PlayerControl { }
 
+pub struct EnemyControl { }
+
 pub struct Transform {
     pub position: f32::Vec2,
 }

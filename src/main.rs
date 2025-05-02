@@ -4,10 +4,12 @@ mod linalg;
 mod component;
 mod system;
 
+use std::collections::HashSet;
+
 use miniquad::*;
 use resources::ResourceManager;
 use linalg::{f32, u32};
-use system::{movement_system, render_system};
+use system::{enemy_movement_system, player_movement_system, render_system};
 
 const MAX_SPRITES: usize = 16;
 
@@ -21,6 +23,7 @@ struct Stage {
     ctx: Box<dyn RenderingBackend>,
     pipeline: Pipeline,
     bindings: Bindings,
+    pressed_keys: HashSet<KeyCode>,
     world: ecs::World,
 }
 
@@ -30,10 +33,10 @@ impl Stage {
 
         #[rustfmt::skip]
         let vertices: [Vertex; 4] = [
-            Vertex { pos : f32::Vec2 { x: -0.5, y: -0.5 }, uv: f32::Vec2 { x: 0., y: 0. } },
-            Vertex { pos : f32::Vec2 { x:  0.5, y: -0.5 }, uv: f32::Vec2 { x: 0.5, y: 0. } },
-            Vertex { pos : f32::Vec2 { x:  0.5, y:  0.5 }, uv: f32::Vec2 { x: 0.5, y: 0.5 } },
-            Vertex { pos : f32::Vec2 { x: -0.5, y:  0.5 }, uv: f32::Vec2 { x: 0., y: 0.5 } },
+            Vertex { pos : f32::Vec2 { x: -0.05, y: -0.05 }, uv: f32::Vec2 { x: 0., y: 0. } },
+            Vertex { pos : f32::Vec2 { x:  0.05, y: -0.05 }, uv: f32::Vec2 { x: 0.5, y: 0. } },
+            Vertex { pos : f32::Vec2 { x:  0.05, y:  0.05 }, uv: f32::Vec2 { x: 0.5, y: 0.5 } },
+            Vertex { pos : f32::Vec2 { x: -0.05, y:  0.05 }, uv: f32::Vec2 { x: 0., y: 0.5 } },
         ];
         let vertex_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
@@ -139,12 +142,16 @@ impl Stage {
                 ..Default::default()
             }
         );
+        
+        // Create HashSet for storing pressed keys
+        let pressed_keys = HashSet::new();
 
         // Set up level
         let mut world = ecs::World::new();
         world.register_component::<component::Transform>();
         world.register_component::<component::Sprite>();
         world.register_component::<component::PlayerControl>();
+        world.register_component::<component::EnemyControl>();
         world.register_component::<component::TextureAtlas>();
 
         // Create texture atlas
@@ -155,19 +162,20 @@ impl Stage {
         // Create player
         let player = world.create_entity();
         world.add_component(&player, component::Transform { position: f32::Vec2 { x: 0.1, y: 0.2 } } );
-        world.add_component(&player, component::Sprite { texture_atlas, atlas_sprite_index: u32::Vec2 { x: 0, y: 0 } } );
+        world.add_component(&player, component::Sprite { texture_atlas, atlas_sprite_index: u32::Vec2 { x: 0, y: 1 } } );
         world.add_component(&player, component::PlayerControl { } );
 
         // Create enemy
         let enemy = world.create_entity();
         world.add_component(&enemy, component::Transform { position: f32::Vec2 { x: 0.5, y: 0.7 } } );
-        world.add_component(&enemy, component::PlayerControl { } );
-        world.add_component(&enemy, component::Sprite { texture_atlas, atlas_sprite_index: u32::Vec2 { x: 0, y: 1 } } );
+        world.add_component(&enemy, component::Sprite { texture_atlas, atlas_sprite_index: u32::Vec2 { x: 0, y: 0 } } );
+        world.add_component(&enemy, component::EnemyControl { } );
 
         Stage {
+            ctx,
             pipeline,
             bindings,
-            ctx,
+            pressed_keys,
             world,
         }
     }
@@ -175,13 +183,41 @@ impl Stage {
 
 impl EventHandler for Stage {
     fn update(&mut self) {
-        movement_system(&mut self.world);
+        player_movement_system(
+            &mut self.world,
+            &self.pressed_keys,
+        );
+        enemy_movement_system(
+            &mut self.world,
+        );
     }
 
     fn draw(&mut self) {
-        render_system(&self.world, &mut self.ctx, &self.bindings, &self.pipeline);
+        render_system(
+            &self.world,
+            &mut self.ctx,
+            &self.bindings,
+            &self.pipeline,
+        );
         self.ctx.end_render_pass();
         self.ctx.commit_frame();
+    }
+
+    fn key_down_event(
+        &mut self,
+        _keycode: KeyCode,
+        _keymods: KeyMods,
+        _repeat: bool,
+    ) {
+        self.pressed_keys.insert(_keycode);
+    }
+
+    fn key_up_event(
+        &mut self,
+        _keycode: KeyCode,
+        _keymods: KeyMods,
+    ) {
+        self.pressed_keys.remove(&_keycode);
     }
 }
 
