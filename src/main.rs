@@ -11,7 +11,7 @@ use resources::ResourceManager;
 use linalg::{f32, u32};
 use system::{enemy_movement_system, player_movement_system, render_system};
 
-const MAX_SPRITES: usize = 16;
+const MAX_SPRITES: usize = 255;
 
 #[repr(C)]
 struct Vertex {
@@ -64,19 +64,18 @@ impl Stage {
         );
 
         // Load necessary resources
-        // Load player texture
         let mut resource_manager = ResourceManager::new();
-        let texture_resource = resource_manager.register_resource("src/atlas.png");
-        resource_manager.load_resources();
-
-        // FIXME: This unwrap business is not good!
+        let texture_atlas_resource = resource_manager.register_resource("src/atlas.png");
+        resource_manager.load_resources().unwrap();
+        
+        // Load player texture
         let texture_atlas_size = u32::Vec2 { x: 32, y: 32 };
         let sprite_size = u32::Vec2 { x: 16, y: 16 };
+        // FIXME: This unwrap business is not good!
         let pixels = resource_manager.get_as_rgba8(
-            &texture_resource,
+            &texture_atlas_resource,
             &texture_atlas_size,
-        ).unwrap().unwrap();
-
+        ).unwrap();
         let texture = ctx.new_texture_from_data_and_format(
             &pixels,
             TextureParams {
@@ -92,13 +91,15 @@ impl Stage {
                 sample_count: 1,
             },
         );
-
+        
+        // Bind to GPU
         let bindings = Bindings {
             vertex_buffers: vec![vertex_buffer, instance_uv_offsets_buffer, instance_positions_buffer],
             index_buffer,
             images: vec![texture],
         };
 
+        // Load shader
         let shader = ctx
             .new_shader(
                 match ctx.info().backend {
@@ -113,7 +114,8 @@ impl Stage {
                 shader::meta(),
             )
             .unwrap();
-
+        
+        // Define pipeline
         let pipeline = ctx.new_pipeline(
             &[
                 BufferLayout::default(),
@@ -157,7 +159,7 @@ impl Stage {
         // Create texture atlas
         // TODO: Explicitly link this to `texture`
         let texture_atlas = world.create_entity();
-        world.add_component(&texture_atlas, component::TextureAtlas::new( texture_atlas_size, sprite_size ));
+        world.add_component(&texture_atlas, component::TextureAtlas::new(texture_atlas_size, sprite_size));
 
         // Create player
         let player = world.create_entity();
