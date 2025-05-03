@@ -161,14 +161,14 @@ impl Stage {
 
         // Create player
         let player = world.create_entity();
-        world.add_component(&player, component::Transform { position: f32::Vec2 { x: 0.1, y: 0.2 } } );
-        world.add_component(&player, component::Sprite { texture_atlas, atlas_sprite_index: u32::Vec2 { x: 0, y: 1 } } );
+        world.add_component(&player, component::Transform { position: f32::Vec2 { x: 0.1, y: 0.2 } });
+        world.add_component(&player, component::Sprite { texture_atlas, atlas_sprite_index: 0 });
         world.add_component(&player, component::PlayerControl { } );
 
         // Create enemy
         let enemy = world.create_entity();
-        world.add_component(&enemy, component::Transform { position: f32::Vec2 { x: 0.5, y: 0.7 } } );
-        world.add_component(&enemy, component::Sprite { texture_atlas, atlas_sprite_index: u32::Vec2 { x: 0, y: 0 } } );
+        world.add_component(&enemy, component::Transform { position: f32::Vec2 { x: 0.5, y: 0.7 } });
+        world.add_component(&enemy, component::Sprite { texture_atlas, atlas_sprite_index: 2 });
         world.add_component(&enemy, component::EnemyControl { } );
 
         Stage {

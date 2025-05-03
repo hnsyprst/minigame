@@ -35,5 +35,5 @@ pub struct Transform {
 pub struct Sprite {
     // TODO: Implement a texture atlas
     pub texture_atlas: Entity,
-    pub atlas_sprite_index: u32::Vec2,
+    pub atlas_sprite_index: u32,
 }

@@ -50,12 +50,14 @@ pub fn sprite_lookup_system(
 ) -> Option<f32::Vec2> {
     let atlas = world.get_component_mut::<TextureAtlas>(&sprite.texture_atlas).ok()??;
     // If sprite is out of bounds, return None
-    if sprite.atlas_sprite_index.x > atlas.num_textures.x || sprite.atlas_sprite_index.y > atlas.num_textures.y {
-        return None
+    let atlas_x = sprite.atlas_sprite_index % atlas.num_textures.x;
+    let atlas_y = sprite.atlas_sprite_index / atlas.num_textures.x;
+    if atlas_x >= atlas.num_textures.x || atlas_y >= atlas.num_textures.y {
+        return None;
     }
     Some(f32::Vec2 {
-        x: atlas.uv_step.x * sprite.atlas_sprite_index.x as f32,
-        y: atlas.uv_step.y * sprite.atlas_sprite_index.y as f32,
+        x: atlas.uv_step.x * atlas_x as f32,
+        y: 1.0 - atlas.uv_step.y * (atlas_y as f32 + 1.0), // Flip the y-coordinate to index from top left
     })
 }
 
@@ -71,6 +73,7 @@ pub fn render_system(
                 transform.position,
                 // TODO: Would be better to get all sprites with the same atlas and run the lookup over all of them at once
                 // rather than looking up the texture atlas over and over again
+                // maybe even just lookup UVs once when the Sprite component is added
                 sprite_lookup_system(world, &sprite).unwrap_or(f32::Vec2 { x: 0., y: 0. }) // Use default texture on lookup error
             )
         })
