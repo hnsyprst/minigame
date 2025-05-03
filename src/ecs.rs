@@ -317,8 +317,7 @@ impl World {
     }
 
     /// Get the component of type T for a specific Entity, if it exists.
-    /// Outside of this module, use World::query instead.
-    fn get_component<T: 'static>(
+    pub fn get_component<T: 'static>(
         &self,
         entity: &Entity,
     ) -> Result<Option<Ref<T>>, EntityComponentError> {

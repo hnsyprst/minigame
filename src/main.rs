@@ -11,7 +11,7 @@ use resources::ResourceManager;
 use linalg::{f32, u32};
 use system::{enemy_movement_system, player_movement_system, render_system};
 
-const MAX_SPRITES: usize = 255;
+const MAX_SPRITES: usize = 1024;
 
 #[repr(C)]
 struct Vertex {
@@ -34,9 +34,9 @@ impl Stage {
         #[rustfmt::skip]
         let vertices: [Vertex; 4] = [
             Vertex { pos : f32::Vec2 { x: -0.05, y: -0.05 }, uv: f32::Vec2 { x: 0., y: 0. } },
-            Vertex { pos : f32::Vec2 { x:  0.05, y: -0.05 }, uv: f32::Vec2 { x: 0.5, y: 0. } },
-            Vertex { pos : f32::Vec2 { x:  0.05, y:  0.05 }, uv: f32::Vec2 { x: 0.5, y: 0.5 } },
-            Vertex { pos : f32::Vec2 { x: -0.05, y:  0.05 }, uv: f32::Vec2 { x: 0., y: 0.5 } },
+            Vertex { pos : f32::Vec2 { x:  0.05, y: -0.05 }, uv: f32::Vec2 { x: 0.125, y: 0. } },
+            Vertex { pos : f32::Vec2 { x:  0.05, y:  0.05 }, uv: f32::Vec2 { x: 0.125, y: 0.125 } },
+            Vertex { pos : f32::Vec2 { x: -0.05, y:  0.05 }, uv: f32::Vec2 { x: 0., y: 0.125 } },
         ];
         let vertex_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
@@ -65,13 +65,16 @@ impl Stage {
 
         // Load necessary resources
         let mut resource_manager = ResourceManager::new();
+        let tilemap_resource = resource_manager.register_resource("src/map_1.csv");
         let texture_atlas_resource = resource_manager.register_resource("src/atlas.png");
         resource_manager.load_resources().unwrap();
+
+        // Load tilemap
+        let tiles = resource_manager.get_as_tiles(&tilemap_resource).unwrap();
         
         // Load player texture
-        let texture_atlas_size = u32::Vec2 { x: 32, y: 32 };
+        let texture_atlas_size = u32::Vec2 { x: 128, y: 128 };
         let sprite_size = u32::Vec2 { x: 16, y: 16 };
-        // FIXME: This unwrap business is not good!
         let pixels = resource_manager.get_as_rgba8(
             &texture_atlas_resource,
             &texture_atlas_size,
@@ -155,23 +158,28 @@ impl Stage {
         world.register_component::<component::PlayerControl>();
         world.register_component::<component::EnemyControl>();
         world.register_component::<component::TextureAtlas>();
+        world.register_component::<component::TileMap>();
 
         // Create texture atlas
         // TODO: Explicitly link this to `texture`
         let texture_atlas = world.create_entity();
-        world.add_component(&texture_atlas, component::TextureAtlas::new(texture_atlas_size, sprite_size));
+        world.add_component(&texture_atlas, component::TextureAtlas::new(texture_atlas_size, sprite_size)).unwrap();
+
+        let tile_map = world.create_entity();
+        world.add_component(&tile_map, component::Transform { position: f32::Vec2 { x: -1.0, y: -1.0 } }).unwrap();
+        world.add_component(&tile_map, component::TileMap { texture_atlas, tiles }).unwrap();
 
         // Create player
         let player = world.create_entity();
-        world.add_component(&player, component::Transform { position: f32::Vec2 { x: 0.1, y: 0.2 } });
-        world.add_component(&player, component::Sprite { texture_atlas, atlas_sprite_index: 0 });
-        world.add_component(&player, component::PlayerControl { } );
+        world.add_component(&player, component::Transform { position: f32::Vec2 { x: 0.1, y: 0.2 } }).unwrap();
+        world.add_component(&player, component::Sprite { texture_atlas, atlas_sprite_index: 28 }).unwrap();
+        world.add_component(&player, component::PlayerControl { } ).unwrap();
 
         // Create enemy
         let enemy = world.create_entity();
-        world.add_component(&enemy, component::Transform { position: f32::Vec2 { x: 0.5, y: 0.7 } });
-        world.add_component(&enemy, component::Sprite { texture_atlas, atlas_sprite_index: 2 });
-        world.add_component(&enemy, component::EnemyControl { } );
+        world.add_component(&enemy, component::Transform { position: f32::Vec2 { x: 0.5, y: 0.7 } }).unwrap();
+        world.add_component(&enemy, component::Sprite { texture_atlas, atlas_sprite_index: 36 }).unwrap();
+        world.add_component(&enemy, component::EnemyControl { } ).unwrap();
 
         Stage {
             ctx,

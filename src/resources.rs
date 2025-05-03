@@ -90,6 +90,41 @@ impl ResourceManager {
         Ok(pixels)
     }
 
+    pub fn get_as_tiles(
+        &self,
+        resource: &Resource,
+    ) -> Result<u8::Matrix, ResourceError> {
+        let bytes = self.get_as_bytes(resource)?;
+        // TODO: Propagate error instead of panic
+        let content = std::str::from_utf8(bytes).unwrap();
+        let mut width: usize = 0;
+        let mut height: usize = 0;
+        let mut data = Vec::new();
+
+        for (row_idx, row) in content.lines().enumerate() {
+            let row_values: Result<Vec<u8>, ResourceError> = row
+                .split(",")
+                // FIXME: Remove unwrap
+                .map(| value | {
+                    value.trim().parse::<u8>().map_err(| _err | { ResourceError::ParseError })
+                })
+                .collect();
+            let row_values = row_values?;
+            // All subsequent rows must match first row's length
+            if row_idx == 0 { 
+                width = row_values.len()
+            } else if row_values.len() != width {
+                return Err(ResourceError::ParseError)
+            }
+            height += 1;
+            data.extend(row_values)
+        }
+
+        let matrix = u8::Matrix::from_vec(width, height, data).map_err(| _err | { ResourceError::ParseError })?;
+
+        Ok(matrix)
+    }
+
     pub fn load_resources(&mut self) -> Result<(), ResourceError> {
         let mut pending_count: usize = 0;
         let loaded_bytes = Rc::new(RefCell::new(Vec::new()));

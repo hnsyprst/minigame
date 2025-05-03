@@ -1,8 +1,9 @@
-use crate::{ecs::Entity, linalg::{f32, u32}};
+use crate::{ecs::Entity, linalg::{f32, u32, u8}};
 
 pub struct TextureAtlas {
     pub num_textures: u32::Vec2,
     pub uv_step: f32::Vec2,
+    pub texture_size: u32::Vec2,
 }
 
 impl TextureAtlas {
@@ -19,9 +20,15 @@ impl TextureAtlas {
             uv_step: f32::Vec2 {
                 x: 1.0 / num_textures.x as f32,
                 y: 1.0 / num_textures.y as f32,
-            }
+            },
+            texture_size,
         }
     }
+}
+
+pub struct TileMap {
+    pub texture_atlas: Entity,
+    pub tiles: u8::Matrix,
 }
 
 pub struct PlayerControl { }
