@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use miniquad::{date, window, Bindings, BufferSource, KeyCode, Pipeline, RenderingBackend, UniformsSource};
 
-use crate::{component::{EnemyControl, PlayerControl, Sprite, TextureAtlas, TileMap, Transform}, ecs::World, linalg::{f32::{self, Vec2}, u32, Vector}, shader};
+use crate::{bundle::{BulletBundle}, component::{ChildOf, EnemyControl, PlayerControl, ShootsBullet, Sprite, TextureAtlas, TileMap, Transform}, ecs::{Entity, World}, linalg::{f32, Vector}, shader};
 
 pub fn player_movement_system(
     world: &mut World,
@@ -33,6 +33,33 @@ pub fn player_movement_system(
     }
 }
 
+pub fn shoot_gun_system(
+    world: &mut World,
+    mouse_position: &f32::Vec2,
+    pressed_keys: &HashSet<KeyCode>,
+) {
+    // TODO: Change to mouse click
+    if pressed_keys.contains(&KeyCode::E) {
+        let shoot_data: Vec<(f32::Vec2, f32::Vec2)> = world.query::<(&ShootsBullet, &Transform)>()
+            .map(| (entity, (shoots_bullet, transform)) | {
+                let world_position = compute_world_transform(world, &entity, &transform);
+                let vel = world_position.normalize() * shoots_bullet.bullet_speed;
+                (vel, world_position)
+            })
+            .collect();
+
+        for (vel, position) in shoot_data {
+            let bullet = world.create_entity();
+            world.add_bundle(&bullet, BulletBundle {
+                transform: Transform {
+                    position,
+                },
+                ..Default::default()
+            });
+        }
+    }
+}
+
 pub fn enemy_movement_system(
     world: &mut World,
 ) {
@@ -44,78 +71,17 @@ pub fn enemy_movement_system(
     }
 }
 
-/// Get texture UV coordinates for index in a TextureAtlas
-fn texture_atlas_lookup(
-    index: u32,
-    atlas: &TextureAtlas,
-) -> Option<f32::Vec2> {
-    let atlas_x = index % atlas.num_textures.x;
-    let atlas_y = index / atlas.num_textures.x;
-    if atlas_x >= atlas.num_textures.x || atlas_y >= atlas.num_textures.y {
-        return None;
+fn compute_world_transform(
+    world: &World,
+    entity: &Entity,
+    transform: &Transform,
+) -> f32::Vec2 {
+    if let Some(child_of) = world.get_component::<ChildOf>(entity).unwrap() {
+        let parent_transform = world.get_component::<Transform>(&child_of.parent).unwrap().expect("Parent referenced in ChildOf component did not have a Transform component!");
+        transform.position + parent_transform.position
+    } else {
+        transform.position
     }
-    Some(f32::Vec2 {
-        x: atlas.uv_step.x * atlas_x as f32,
-        y: 1.0 - atlas.uv_step.y * (atlas_y as f32 + 1.0), // Flip the y-coordinate to index from top left
-    })
-}
-
-pub fn tile_map_lookup_system(
-    world: &World,
-    tile_map: &TileMap,
-) -> (Vec<f32::Vec2>, Vec<f32::Vec2>) {
-    let atlas = world.get_component::<TextureAtlas>(&tile_map.texture_atlas).unwrap().unwrap();
-    let mut positions = Vec::with_capacity(tile_map.tiles.size());
-    let mut uv_offsets = Vec::with_capacity(tile_map.tiles.size());
-
-    for (row_idx, row) in tile_map.tiles.iter_rows().enumerate() {
-        for (col_idx, tile) in row.iter().enumerate() {
-            positions.push(f32::Vec2 {
-                // FIXME: Fix magic numbers!
-                // Multiply by tile size (set in main.rs)
-                x: col_idx as f32 * 0.1,
-                y: (tile_map.tiles.height() - 1 - row_idx) as f32 * 0.1, // Place tiles in reverse y order
-            });
-            // TODO: Parameterise default texture
-            uv_offsets.push(texture_atlas_lookup(*tile as u32, &atlas).unwrap_or(f32::Vec2 { x: 0., y: 0. })); // Use default texture on lookup error
-        }
-    }
-
-    (positions, uv_offsets)
-}
-
-pub fn tile_map_initialization_system(
-    world: &World,
-) {
-    world.query_mut::<&TileMap>()
-        .for_each(| (_, mut tile_map) | {
-            let (positions, uv_offsets) = tile_map_lookup_system(world, &tile_map);
-            tile_map.tiles_atlas_uv_offsets = Some(uv_offsets);
-            tile_map.tiles_positions = Some(positions);
-        });
-}
-
-pub fn sprite_lookup_system(
-    world: &World,
-    sprite: &Sprite,
-) -> Option<f32::Vec2> {
-    let atlas = world.get_component::<TextureAtlas>(&sprite.texture_atlas).ok()??;
-    texture_atlas_lookup(
-        sprite.atlas_sprite_index,
-        &atlas,
-    )
-}
-
-pub fn sprite_initialization_system(
-    world: &World,
-) {
-    // TODO: Would be better to get all sprites with the same atlas and run the lookup over all of them at once
-    // rather than looking up the texture atlas over and over again
-    world.query_mut::<&Sprite>()
-        .for_each(| (_, mut sprite) | {
-            // TODO: Parameterise default texture
-            sprite.atlas_uv_offset = Some(sprite_lookup_system(world, &sprite).unwrap_or(f32::Vec2 { x: 0., y: 0. })); // Use default texture on lookup error
-        });
 }
 
 pub fn render_system(
@@ -123,6 +89,7 @@ pub fn render_system(
     ctx: &mut Box<dyn RenderingBackend>,
     bindings: &Bindings,
     pipeline: &Pipeline,
+    texture_atlas_entity: &Entity,
 ) {
     let screen_size = {
         let (x, y) = window::screen_size();
@@ -130,30 +97,41 @@ pub fn render_system(
     };
 
     let mut positions = Vec::new();
-    let mut uv_offsets = Vec::new();
+    let mut uv_offsets: Vec<f32::Vec2> = Vec::new();
+    let texture_atlas = world.get_component::<TextureAtlas>(texture_atlas_entity)
+        .unwrap()
+        .expect("Texture atlas entity missing a texture atlas component!");
 
     world.query::<(&Transform, &TileMap)>()
         .for_each(| (_, (transform, tile_map)) | {
-            positions.extend(tile_map.tiles_positions
-                .as_ref()
-                .expect("Tried to draw tiles before tile positions were initialized!")
+            positions.extend(tile_map.tile_positions
                 .iter()
                 .map(| position | {
                     *position + transform.position
                 })
             );
-            uv_offsets.extend(tile_map.tiles_atlas_uv_offsets
-                .as_ref()
-                .expect("Tried to draw tiles before tile UV offsets were initialized!")
+            uv_offsets.extend(
+                tile_map.tiles
+                    .iter()
+                    .map(| atlas_texture_index | {
+                        texture_atlas.uv_offsets
+                            .get(*atlas_texture_index as usize)
+                            .unwrap_or(&f32::Vec2 { x: 0., y: 0. })  // Use default texture on lookup error
+                    })
             );
         });
 
     
     world.query::<(&Transform, &Sprite)>()
-        .for_each(| (_, (transform, sprite)) | {
-            positions.push(transform.position);
+        .for_each(| (entity, (transform, sprite)) | {
+            positions.push(compute_world_transform(world, &entity, &transform));
             // TODO: Parameterise default texture
-            uv_offsets.push(sprite.atlas_uv_offset.expect("Tried to draw sprite before sprite UV offset was initialized!")); // Use default texture on lookup error
+            uv_offsets.push(
+                texture_atlas.uv_offsets
+                    .get(sprite.atlas_texture_index)
+                    .unwrap_or(&f32::Vec2 { x: 0., y: 0. })  // Use default texture on lookup error
+                    .to_owned()
+                );
         });
 
     ctx.buffer_update(

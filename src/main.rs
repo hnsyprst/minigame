@@ -3,13 +3,14 @@ mod resources;
 mod linalg;
 mod component;
 mod system;
+mod bundle;
 
 use std::collections::HashSet;
 
 use miniquad::*;
 use resources::ResourceManager;
 use linalg::{f32, u32};
-use system::{enemy_movement_system, player_movement_system, render_system, sprite_initialization_system, tile_map_initialization_system};
+use system::{enemy_movement_system, player_movement_system, render_system, shoot_gun_system};
 
 const MAX_SPRITES: usize = 1024;
 
@@ -23,8 +24,10 @@ struct Stage {
     ctx: Box<dyn RenderingBackend>,
     pipeline: Pipeline,
     bindings: Bindings,
+    mouse_position: f32::Vec2,
     pressed_keys: HashSet<KeyCode>,
     world: ecs::World,
+    texture_atlas_entity: ecs::Entity, // TODO: Update the resource manager so this isn't an entity anymore
 }
 
 impl Stage {
@@ -150,6 +153,8 @@ impl Stage {
         
         // Create HashSet for storing pressed keys
         let pressed_keys = HashSet::new();
+        // Create Vec2 for storing mouse position
+        let mouse_position = f32::Vec2 { x: 0.0, y: 0.0 };
 
         // Set up level
         let mut world = ecs::World::new();
@@ -159,39 +164,45 @@ impl Stage {
         world.register_component::<component::EnemyControl>();
         world.register_component::<component::TextureAtlas>();
         world.register_component::<component::TileMap>();
+        world.register_component::<component::ChildOf>();
+        world.register_component::<component::ShootsBullet>();
 
         // Create texture atlas
         // TODO: Explicitly link this to `texture`
-        let texture_atlas = world.create_entity();
-        world.add_component(&texture_atlas, component::TextureAtlas::new(texture_atlas_size, sprite_size)).unwrap();
+        let texture_atlas_entity = world.create_entity();
+        world.add_component(&texture_atlas_entity, component::TextureAtlas::new(texture_atlas_size, sprite_size)).unwrap();
 
         let tile_map = world.create_entity();
         world.add_component(&tile_map, component::Transform { position: f32::Vec2 { x: -1.0, y: -1.0 } }).unwrap();
-        world.add_component(&tile_map, component::TileMap { texture_atlas, tiles, tiles_atlas_uv_offsets: None, tiles_positions: None }).unwrap();
+        world.add_component(&tile_map, component::TileMap::new(tiles, f32::Vec2 { x: 0.1, y: 0.1 } )).unwrap();
 
         // Create player
         let player = world.create_entity();
         world.add_component(&player, component::Transform { position: f32::Vec2 { x: 0.1, y: 0.2 } }).unwrap();
-        world.add_component(&player, component::Sprite { texture_atlas, atlas_sprite_index: 28, atlas_uv_offset: None }).unwrap();
+        world.add_component(&player, component::Sprite { atlas_texture_index: 28 }).unwrap();
         world.add_component(&player, component::PlayerControl { } ).unwrap();
+
+        // Create gun to demonstrate ChildOf component
+        let gun = world.create_entity();
+        world.add_component(&gun, component::ChildOf { parent: player }).unwrap();
+        world.add_component(&gun, component::Transform { position: f32::Vec2 { x: 0.05, y: 0.0 } }).unwrap();
+        world.add_component(&gun, component::Sprite { atlas_texture_index: 29 }).unwrap();
+        world.add_component(&gun, component::ShootsBullet { bullet_speed: 0.1, is_active: true }).unwrap();
 
         // Create enemy
         let enemy = world.create_entity();
         world.add_component(&enemy, component::Transform { position: f32::Vec2 { x: 0.5, y: 0.7 } }).unwrap();
-        world.add_component(&enemy, component::Sprite { texture_atlas, atlas_sprite_index: 36, atlas_uv_offset: None }).unwrap();
+        world.add_component(&enemy, component::Sprite { atlas_texture_index: 36 }).unwrap();
         world.add_component(&enemy, component::EnemyControl { } ).unwrap();
-
-        // Initialise Entities
-        // TODO: Move this into a dedicated `init()` method once level switching is implemented
-        sprite_initialization_system(&world);
-        tile_map_initialization_system(&world);
 
         Stage {
             ctx,
             pipeline,
             bindings,
             pressed_keys,
+            mouse_position,
             world,
+            texture_atlas_entity,
         }
     }
 }
@@ -200,6 +211,11 @@ impl EventHandler for Stage {
     fn update(&mut self) {
         player_movement_system(
             &mut self.world,
+            &self.pressed_keys,
+        );
+        shoot_gun_system(
+            &mut self.world,
+            &self.mouse_position,
             &self.pressed_keys,
         );
         enemy_movement_system(
@@ -213,6 +229,7 @@ impl EventHandler for Stage {
             &mut self.ctx,
             &self.bindings,
             &self.pipeline,
+            &self.texture_atlas_entity,
         );
         self.ctx.end_render_pass();
         self.ctx.commit_frame();
@@ -233,6 +250,16 @@ impl EventHandler for Stage {
         _keymods: KeyMods,
     ) {
         self.pressed_keys.remove(&_keycode);
+    }
+
+    fn mouse_motion_event(
+        &mut self,
+        _x: f32,
+        _y: f32,
+    ) {
+        let (screen_width, screen_height) = miniquad::window::screen_size();
+        self.mouse_position.x = _x / screen_width;
+        self.mouse_position.y = _y / screen_height;
     }
 }
 

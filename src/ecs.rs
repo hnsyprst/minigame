@@ -1,5 +1,7 @@
 use std::{any::{Any, TypeId}, cell::{Ref, RefCell, RefMut}, collections::HashMap};
 
+use crate::bundle::Bundle;
+
 type EntityId = u16;
 type EntityGeneration = u64; // TODO: This is probably overkill, but saves having to check if we've run out of generations. Make a choice later!
 
@@ -444,6 +446,15 @@ impl World {
                 Ok(())
             },
         }
+    }
+
+    pub fn add_bundle<T> (
+        &mut self,
+        entity: &Entity,
+        bundle: T,
+    )
+    where T: Bundle + 'static {
+        bundle.add_components(self, entity);
     }
 }
 

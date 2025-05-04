@@ -9,6 +9,8 @@ pub trait Vector {
 
     fn abs(&self) -> Self::Scalar;
     fn normalize(&self) -> Self;
+    fn dot(&self, rhs: Self) -> Self::Scalar;
+    fn angle_to(&self, rhs: Self) -> Self::Scalar;
 }
 
 pub mod f32 {
@@ -22,7 +24,7 @@ pub mod f32 {
     impl crate::linalg::Vector for Vec2 {
         type Scalar = f32;
         
-        fn abs(&self) -> f32 {
+        fn abs(&self) -> Self::Scalar {
             (self.x.powf(2.0) + self.y.powf(2.0)).sqrt()
         }
 
@@ -37,6 +39,17 @@ pub mod f32 {
                 x: self.x / mag,
                 y: self.y / mag,
             }
+        }
+
+        fn dot(&self, rhs: Self) -> Self::Scalar {
+            self.x * rhs.x + self.y * rhs.y
+        }
+
+        fn angle_to(
+            &self,
+            rhs: Vec2,
+        ) -> Self::Scalar {
+            (self.dot(rhs) / (self.abs() * rhs.abs())).acos()
         }
     }
 
@@ -232,6 +245,10 @@ pub mod u8 {
             if let Some(cell) = self.get_mut(x, y) {
                 *cell = value
             }
+        }
+
+        pub fn iter(&self) -> impl Iterator<Item = &u8> {
+            self.data.iter()
         }
 
         pub fn iter_rows(&self) -> impl Iterator<Item = &[u8]>{
