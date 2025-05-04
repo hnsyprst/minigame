@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use miniquad::*;
 use resources::ResourceManager;
 use linalg::{f32, u32};
-use system::{enemy_movement_system, player_movement_system, render_system};
+use system::{enemy_movement_system, player_movement_system, render_system, sprite_initialization_system, tile_map_initialization_system};
 
 const MAX_SPRITES: usize = 1024;
 
@@ -167,19 +167,24 @@ impl Stage {
 
         let tile_map = world.create_entity();
         world.add_component(&tile_map, component::Transform { position: f32::Vec2 { x: -1.0, y: -1.0 } }).unwrap();
-        world.add_component(&tile_map, component::TileMap { texture_atlas, tiles }).unwrap();
+        world.add_component(&tile_map, component::TileMap { texture_atlas, tiles, tiles_atlas_uv_offsets: None, tiles_positions: None }).unwrap();
 
         // Create player
         let player = world.create_entity();
         world.add_component(&player, component::Transform { position: f32::Vec2 { x: 0.1, y: 0.2 } }).unwrap();
-        world.add_component(&player, component::Sprite { texture_atlas, atlas_sprite_index: 28 }).unwrap();
+        world.add_component(&player, component::Sprite { texture_atlas, atlas_sprite_index: 28, atlas_uv_offset: None }).unwrap();
         world.add_component(&player, component::PlayerControl { } ).unwrap();
 
         // Create enemy
         let enemy = world.create_entity();
         world.add_component(&enemy, component::Transform { position: f32::Vec2 { x: 0.5, y: 0.7 } }).unwrap();
-        world.add_component(&enemy, component::Sprite { texture_atlas, atlas_sprite_index: 36 }).unwrap();
+        world.add_component(&enemy, component::Sprite { texture_atlas, atlas_sprite_index: 36, atlas_uv_offset: None }).unwrap();
         world.add_component(&enemy, component::EnemyControl { } ).unwrap();
+
+        // Initialise Entities
+        // TODO: Move this into a dedicated `init()` method once level switching is implemented
+        sprite_initialization_system(&world);
+        tile_map_initialization_system(&world);
 
         Stage {
             ctx,

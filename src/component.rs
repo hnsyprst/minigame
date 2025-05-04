@@ -26,9 +26,14 @@ impl TextureAtlas {
     }
 }
 
+// TODO: Should this just have a new() method and immediately get `tiles_atlas_uv_offsets` 
+// and `tiles_positions` from the texture atlas instead of requiring a whole system?
+// `tiles` is useless after init()
 pub struct TileMap {
     pub texture_atlas: Entity,
     pub tiles: u8::Matrix,
+    pub tiles_atlas_uv_offsets: Option<Vec<f32::Vec2>>,
+    pub tiles_positions: Option<Vec<f32::Vec2>>,
 }
 
 pub struct PlayerControl { }
@@ -39,8 +44,10 @@ pub struct Transform {
     pub position: f32::Vec2,
 }
 
+// TODO: Should this just have a new() method and immediately get `atlas_uv_offset` from
+// the texture atlas instead of requiring a whole system? `atlas_sprite_index` is useless after init()
 pub struct Sprite {
-    // TODO: Implement a texture atlas
     pub texture_atlas: Entity,
     pub atlas_sprite_index: u32,
+    pub atlas_uv_offset: Option<f32::Vec2>,
 }

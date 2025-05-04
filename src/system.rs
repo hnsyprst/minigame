@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use miniquad::{date, window, Bindings, BufferSource, KeyCode, Pipeline, RenderingBackend, UniformsSource};
 
-use crate::{component::{EnemyControl, PlayerControl, Sprite, TextureAtlas, TileMap, Transform}, ecs::World, linalg::{f32, u32, Vector}, shader};
+use crate::{component::{EnemyControl, PlayerControl, Sprite, TextureAtlas, TileMap, Transform}, ecs::World, linalg::{f32::{self, Vec2}, u32, Vector}, shader};
 
 pub fn player_movement_system(
     world: &mut World,
@@ -60,7 +60,7 @@ fn texture_atlas_lookup(
     })
 }
 
-pub fn tilemap_lookup_system(
+pub fn tile_map_lookup_system(
     world: &World,
     tile_map: &TileMap,
 ) -> (Vec<f32::Vec2>, Vec<f32::Vec2>) {
@@ -71,6 +71,8 @@ pub fn tilemap_lookup_system(
     for (row_idx, row) in tile_map.tiles.iter_rows().enumerate() {
         for (col_idx, tile) in row.iter().enumerate() {
             positions.push(f32::Vec2 {
+                // FIXME: Fix magic numbers!
+                // Multiply by tile size (set in main.rs)
                 x: col_idx as f32 * 0.1,
                 y: (tile_map.tiles.height() - 1 - row_idx) as f32 * 0.1, // Place tiles in reverse y order
             });
@@ -82,6 +84,17 @@ pub fn tilemap_lookup_system(
     (positions, uv_offsets)
 }
 
+pub fn tile_map_initialization_system(
+    world: &World,
+) {
+    world.query_mut::<&TileMap>()
+        .for_each(| (_, mut tile_map) | {
+            let (positions, uv_offsets) = tile_map_lookup_system(world, &tile_map);
+            tile_map.tiles_atlas_uv_offsets = Some(uv_offsets);
+            tile_map.tiles_positions = Some(positions);
+        });
+}
+
 pub fn sprite_lookup_system(
     world: &World,
     sprite: &Sprite,
@@ -91,6 +104,18 @@ pub fn sprite_lookup_system(
         sprite.atlas_sprite_index,
         &atlas,
     )
+}
+
+pub fn sprite_initialization_system(
+    world: &World,
+) {
+    // TODO: Would be better to get all sprites with the same atlas and run the lookup over all of them at once
+    // rather than looking up the texture atlas over and over again
+    world.query_mut::<&Sprite>()
+        .for_each(| (_, mut sprite) | {
+            // TODO: Parameterise default texture
+            sprite.atlas_uv_offset = Some(sprite_lookup_system(world, &sprite).unwrap_or(f32::Vec2 { x: 0., y: 0. })); // Use default texture on lookup error
+        });
 }
 
 pub fn render_system(
@@ -109,24 +134,26 @@ pub fn render_system(
 
     world.query::<(&Transform, &TileMap)>()
         .for_each(| (_, (transform, tile_map)) | {
-            let (new_positions, new_uv_offsets) = tilemap_lookup_system(world, &tile_map);
-            positions.extend(new_positions
+            positions.extend(tile_map.tiles_positions
+                .as_ref()
+                .expect("Tried to draw tiles before tile positions were initialized!")
                 .iter()
                 .map(| position | {
                     *position + transform.position
-                }
-            ));
-            uv_offsets.extend(new_uv_offsets);
+                })
+            );
+            uv_offsets.extend(tile_map.tiles_atlas_uv_offsets
+                .as_ref()
+                .expect("Tried to draw tiles before tile UV offsets were initialized!")
+            );
         });
 
-    // TODO: Would be better to get all sprites with the same atlas and run the lookup over all of them at once
-    // rather than looking up the texture atlas over and over again
-    // maybe even just lookup UVs once when the Sprite component is added
+    
     world.query::<(&Transform, &Sprite)>()
         .for_each(| (_, (transform, sprite)) | {
             positions.push(transform.position);
             // TODO: Parameterise default texture
-            uv_offsets.push(sprite_lookup_system(world, &sprite).unwrap_or(f32::Vec2 { x: 0., y: 0. })); // Use default texture on lookup error
+            uv_offsets.push(sprite.atlas_uv_offset.expect("Tried to draw sprite before sprite UV offset was initialized!")); // Use default texture on lookup error
         });
 
     ctx.buffer_update(
