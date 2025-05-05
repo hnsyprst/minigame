@@ -448,6 +448,47 @@ impl World {
         }
     }
 
+    pub fn remove_component<T: 'static>(
+        &self,
+        entity: &Entity,
+    ) -> Result<(), EntityComponentError> {
+        // First check if this entity is valid
+        if !self.entity_allocator.is_valid(entity) {
+            return Err(EntityComponentError::InvalidEntity)
+        }
+        let mut component_pool: RefMut<'_, ComponentPool<T>> = self.get_component_pool_mut::<T>()?;
+        match component_pool.all_entities[entity.id as usize] {
+            Some(entities_with_component_index) => {
+                let num_entities_with_component = component_pool.entities_with_component.len();
+                if num_entities_with_component > 0 {
+                    // Swap component to be removed with last component
+                    // (minimises number of changes that need to be made to `all_entities`
+                    component_pool.entities_with_component.swap(entities_with_component_index, num_entities_with_component - 1);
+                    component_pool.components.swap(entities_with_component_index, num_entities_with_component - 1);
+    
+                    // Modify entry in `all_entities` for swapped component
+                    let swapped_entity_id = component_pool.entities_with_component[entities_with_component_index];
+                    component_pool.all_entities[swapped_entity_id.id as usize] = Some(entities_with_component_index);
+    
+                    // Remove last component
+                    component_pool.entities_with_component.remove(num_entities_with_component - 1);
+                    component_pool.components.remove(num_entities_with_component - 1);
+                } else {
+                    component_pool.entities_with_component.remove(entities_with_component_index);
+                    component_pool.components.remove(entities_with_component_index);
+                }
+                // Set entry in `all_entities` to None
+                component_pool.all_entities[entity.id as usize] = None;
+                Ok(())
+            },
+            // If the value in `all_entities` is None, the Entity does not have this component
+            None => {
+                println!("Tried to remove a component from an entity that did not have it!");
+                Ok(())
+            },
+        }
+    }
+
     pub fn add_bundle<T> (
         &mut self,
         entity: &Entity,
@@ -494,14 +535,28 @@ impl <'a, A: 'static> Query<'a> for &'a A {
         world: &'a World,
         entity: &Entity,
     ) -> Option<Self::QueryResult> {
-        world.get_component::<A>(entity).expect("Invalid entity, or component was not registered!")
+        // Since we don't remove Entities from component pools when Entities are destroyed,
+        // it's possible that queries will be executed over invalid (i.e., dead) Entities.
+        // In this case, we can just return None
+        match world.get_component::<A>(entity) {
+            Ok(component) => component,
+            Err(EntityComponentError::InvalidEntity) => None,
+            Err(EntityComponentError::UnregisteredComponent) => panic!("Component was not registered!"),
+        }
     }
 
     fn execute_mut(
         world: &'a World,
         entity: &Entity,
     ) -> Option<Self::QueryResultMut> {
-        world.get_component_mut::<A>(entity).expect("Invalid entity, or component was not registered!")
+        // Since we don't remove Entities from component pools when Entities are destroyed,
+        // it's possible that queries will be executed over invalid (i.e., dead) Entities.
+        // In this case, we can just return None
+        match world.get_component_mut::<A>(entity) {
+            Ok(component) => component,
+            Err(EntityComponentError::InvalidEntity) => None,
+            Err(EntityComponentError::UnregisteredComponent) => panic!("Component was not registered!"),
+        }
     }
 }
 
@@ -526,8 +581,19 @@ impl <'a, A: 'static, B: 'static> Query<'a> for (&'a A, &'a B) {
         world: &'a World,
         entity: &Entity,
     ) -> Option<Self::QueryResult> {
-        let component_a = world.get_component::<A>(entity).expect("Invalid entity, or component was not registered!")?;
-        let component_b = world.get_component::<B>(entity).expect("Invalid entity, or component was not registered!")?;
+        // Since we don't remove Entities from component pools when Entities are destroyed,
+        // it's possible that queries will be executed over invalid (i.e., dead) Entities.
+        // In this case, we can just return None
+        let component_a = match world.get_component::<A>(entity) {
+            Ok(component) => component,
+            Err(EntityComponentError::InvalidEntity) => None,
+            Err(EntityComponentError::UnregisteredComponent) => panic!("Component was not registered!"),
+        }?;
+        let component_b = match world.get_component::<B>(entity) {
+            Ok(component) => component,
+            Err(EntityComponentError::InvalidEntity) => None,
+            Err(EntityComponentError::UnregisteredComponent) => panic!("Component was not registered!"),
+        }?;
         Some((component_a, component_b))
     }
 
@@ -535,8 +601,19 @@ impl <'a, A: 'static, B: 'static> Query<'a> for (&'a A, &'a B) {
         world: &'a World,
         entity: &Entity,
     ) -> Option<Self::QueryResultMut> {
-        let component_a = world.get_component_mut::<A>(entity).expect("Invalid entity, or component was not registered!")?;
-        let component_b = world.get_component_mut::<B>(entity).expect("Invalid entity, or component was not registered!")?;
+        // Since we don't remove Entities from component pools when Entities are destroyed,
+        // it's possible that queries will be executed over invalid (i.e., dead) Entities.
+        // In this case, we can just return None
+        let component_a = match world.get_component_mut::<A>(entity) {
+            Ok(component) => component,
+            Err(EntityComponentError::InvalidEntity) => None,
+            Err(EntityComponentError::UnregisteredComponent) => panic!("Component was not registered!"),
+        }?;
+        let component_b = match world.get_component_mut::<B>(entity) {
+            Ok(component) => component,
+            Err(EntityComponentError::InvalidEntity) => None,
+            Err(EntityComponentError::UnregisteredComponent) => panic!("Component was not registered!"),
+        }?;
         Some((component_a, component_b))
     }
 }

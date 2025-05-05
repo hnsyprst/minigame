@@ -1,4 +1,6 @@
-use crate::{ecs::Entity, linalg::{f32::{self, Vec2}, u32, u8}};
+use std::collections::HashSet;
+
+use crate::{ecs::{Entity, World}, linalg::{f32::{self, Vec2}, u32, u8}};
 
 pub struct TextureAtlas {
     pub uv_offsets: Vec<f32::Vec2>,
@@ -56,11 +58,36 @@ impl TileMap {
             tile_positions,
         }
     }
+
+    // FIXME: Think this should be an initialisation system instead
+    pub fn spawn_colliders(
+        &self,
+        world: &mut World,
+        self_entity: &Entity,
+        tile_size: f32::Vec2,
+        collidable_tile_ids: &HashSet<u8>,
+    ) {
+        for (idx, tile_value) in self.tiles.iter().enumerate() {
+            if collidable_tile_ids.contains(tile_value) {
+                let position = self.tile_positions[idx];
+
+                let collider = world.create_entity();
+                world.add_component(&collider, ChildOf { parent: *self_entity }).unwrap();
+                world.add_component(&collider, Transform { position }).unwrap();
+                world.add_component(&collider, Collider { size: tile_size, is_static: true }).unwrap();
+                world.add_component(&collider, Wall { }).unwrap();
+            }
+        }
+    }
 }
 
-pub struct PlayerControl { }
+pub struct Player { }
 
-pub struct EnemyControl { }
+pub struct Enemy { }
+
+pub struct Bullet { }
+
+pub struct Wall { }
 
 pub struct Transform {
     pub position: f32::Vec2,
@@ -84,4 +111,14 @@ pub struct Sprite {
 pub struct ShootsBullet {
     pub bullet_speed: f32,
     pub is_active: bool,
+}
+
+pub struct Collider {
+    pub size: f32::Vec2,
+    pub is_static: bool,
+}
+
+pub struct CollisionEvent { 
+    pub entity_a: Entity,
+    pub entity_b: Entity,
 }

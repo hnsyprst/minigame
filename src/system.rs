@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use miniquad::{date, window, Bindings, BufferSource, KeyCode, Pipeline, RenderingBackend, UniformsSource};
 
-use crate::{bundle::BulletBundle, component::{ChildOf, EnemyControl, PlayerControl, ShootsBullet, Sprite, TextureAtlas, TileMap, Transform, Velocity}, ecs::{Entity, World}, linalg::{f32, Vector}, shader};
+use crate::{bundle::BulletBundle, component::{Bullet, ChildOf, Collider, CollisionEvent, Enemy, Player, ShootsBullet, Sprite, TextureAtlas, TileMap, Transform, Velocity}, ecs::{Entity, World}, linalg::{f32, Vector}, shader};
 
 pub fn player_movement_system(
     world: &mut World,
@@ -27,7 +27,7 @@ pub fn player_movement_system(
     movement_vec = movement_vec.normalize();
     movement_vec *= speed;
 
-    for (_, (_player_control, mut transform)) in world.query_mut::<(&PlayerControl, &Transform)>() {
+    for (_, (_player_control, mut transform)) in world.query_mut::<(&Player, &Transform)>() {
         transform.position.x += movement_vec.x;
         transform.position.y += movement_vec.y;
     }
@@ -52,7 +52,7 @@ pub fn shoot_gun_system(
     if pressed_keys.contains(&KeyCode::Space) {
         let shoot_data: Vec<(f32::Vec2, f32::Vec2)> = world.query::<(&ShootsBullet, &Transform)>()
             .map(| (entity, (shoots_bullet, transform)) | {
-                let world_position = compute_world_transform(world, &entity, &transform);
+                let world_position = compute_world_position(world, &entity, &transform);
                 let velocity_vec = (screen_to_world(mouse_position) - world_position).normalize() * shoots_bullet.bullet_speed;
                 (velocity_vec, world_position)
             })
@@ -77,7 +77,7 @@ pub fn enemy_movement_system(
     world: &mut World,
 ) {
     let mut t = date::now() * 0.3;
-    for (entity, (_enemy_control, mut transform)) in world.query_mut::<(&EnemyControl, &Transform)>() {
+    for (entity, (_enemy_control, mut transform)) in world.query_mut::<(&Enemy, &Transform)>() {
         t += entity.get_id() as f64;
         transform.position.x = t.sin() as f32 * 0.5;
         transform.position.y = (t * 3.).cos() as f32 * 0.5;
@@ -92,7 +92,7 @@ pub fn apply_velocity_system(
     }
 }
 
-fn compute_world_transform(
+fn compute_world_position(
     world: &World,
     entity: &Entity,
     transform: &Transform,
@@ -145,7 +145,7 @@ pub fn render_system(
     
     world.query::<(&Transform, &Sprite)>()
         .for_each(| (entity, (transform, sprite)) | {
-            positions.push(compute_world_transform(world, &entity, &transform));
+            positions.push(compute_world_position(world, &entity, &transform));
             // TODO: Parameterise default texture
             uv_offsets.push(
                 texture_atlas.uv_offsets
@@ -187,4 +187,71 @@ pub fn render_system(
     }));
 
     ctx.draw(0, 6, positions.len() as i32);
+}
+
+fn colliders_colliding(
+    world: &World,
+    entity_a: &Entity,
+    collider_a: &Collider,
+    transform_a: &Transform,
+    entity_b: &Entity,
+    collider_b: &Collider,
+    transform_b: &Transform,
+) -> bool {
+    let position_a = compute_world_position(world, entity_a, transform_a);
+    let position_b = compute_world_position(world, entity_b, transform_b);
+    {
+        position_a.x < position_b.x + collider_b.size.x &&
+        position_a.x + collider_a.size.x > position_b.x &&
+        position_a.y < position_b.y + collider_b.size.y &&
+        position_a.y + collider_a.size.y > position_b.y
+    }
+}
+
+pub fn collision_detection_system(
+    world: &mut World,
+) {
+    // TODO: Implement quadtree
+    for (entity_a, (collider_a, transform_a)) in world.query::<(&Collider, &Transform)>() {
+        for (entity_b, (collider_b, transform_b)) in world.query::<(&Collider, &Transform)>() {
+            if entity_a == entity_b { continue }
+            if colliders_colliding(world, &entity_a, &collider_a, &transform_a, &entity_b, &collider_b, &transform_b) && !collider_a.is_static {
+                world.add_component(&entity_a, CollisionEvent { entity_a, entity_b }).unwrap();
+                // We'll add the CollisionEvent component to `entity_b` on the second pass
+                // FIXME: Iterating through all the entities twice is so inefficient!
+            }
+        }
+    }
+}
+
+pub fn collision_resolution_system(
+    world: &mut World,
+) {
+    let mut bullet_entities = Vec::new();
+    for (entity, collision_event, ) in world.query::<&CollisionEvent>() {
+        if world.get_component::<Bullet>(&collision_event.entity_a).unwrap().is_some() &&
+        world.get_component::<Bullet>(&collision_event.entity_b).unwrap().is_none() && 
+        // For now, bullets won't collide with the player
+        world.get_component::<Player>(&collision_event.entity_b).unwrap().is_none()
+        {
+            bullet_entities.push(entity);
+        }
+    }
+    for entity in bullet_entities {
+        world.destroy_entity(entity);
+    }
+}
+
+pub fn collision_cleanup_system(
+    world: &mut World,
+) {
+    let entities: Vec<Entity> = world.query::<&CollisionEvent>()
+        .map(| (entity, _) | {
+            entity
+        })
+        .collect();
+    if entities.is_empty() { return }
+    for entity in entities {
+        world.remove_component::<CollisionEvent>(&entity).unwrap();
+    }
 }

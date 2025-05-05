@@ -5,12 +5,12 @@ mod component;
 mod system;
 mod bundle;
 
-use std::collections::HashSet;
+use std::{collections::HashSet};
 
 use miniquad::*;
 use resources::ResourceManager;
 use linalg::{f32, u32};
-use system::{apply_velocity_system, enemy_movement_system, player_movement_system, render_system, shoot_gun_system};
+use system::{apply_velocity_system, collision_cleanup_system, collision_detection_system, collision_resolution_system, enemy_movement_system, player_movement_system, render_system, shoot_gun_system};
 
 const MAX_SPRITES: usize = 1024;
 
@@ -161,40 +161,52 @@ impl Stage {
         world.register_component::<component::Transform>();
         world.register_component::<component::Velocity>();
         world.register_component::<component::Sprite>();
-        world.register_component::<component::PlayerControl>();
-        world.register_component::<component::EnemyControl>();
+        world.register_component::<component::Player>();
+        world.register_component::<component::Enemy>();
+        world.register_component::<component::Bullet>();
+        world.register_component::<component::Wall>();
         world.register_component::<component::TextureAtlas>();
         world.register_component::<component::TileMap>();
         world.register_component::<component::ChildOf>();
         world.register_component::<component::ShootsBullet>();
+        world.register_component::<component::Collider>();
+        world.register_component::<component::CollisionEvent>();
 
         // Create texture atlas
         // TODO: Explicitly link this to `texture`
         let texture_atlas_entity = world.create_entity();
         world.add_component(&texture_atlas_entity, component::TextureAtlas::new(texture_atlas_size, sprite_size)).unwrap();
 
+        // Create tile map
         let tile_map = world.create_entity();
         world.add_component(&tile_map, component::Transform { position: f32::Vec2 { x: -1.0, y: -1.0 } }).unwrap();
-        world.add_component(&tile_map, component::TileMap::new(tiles, f32::Vec2 { x: 0.1, y: 0.1 } )).unwrap();
+        let tile_size = f32::Vec2 { x: 0.1, y: 0.1 };
+        let tile_map_component = component::TileMap::new(tiles, tile_size);
+        let collidable_tile_ids: HashSet<u8> = [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]
+            .into_iter()
+            .collect();
+        tile_map_component.spawn_colliders(&mut world, &tile_map, tile_size, &collidable_tile_ids);
+        world.add_component(&tile_map, tile_map_component).unwrap();
 
         // Create player
         let player = world.create_entity();
-        world.add_component(&player, component::Transform { position: f32::Vec2 { x: 0.1, y: 0.2 } }).unwrap();
+        world.add_component(&player, component::Transform { position: f32::Vec2 { x: 0.5, y: 0.2 } }).unwrap();
         world.add_component(&player, component::Sprite { atlas_texture_index: 28 }).unwrap();
-        world.add_component(&player, component::PlayerControl { } ).unwrap();
+        world.add_component(&player, component::Player { } ).unwrap();
+        world.add_component(&player, component::Collider { size: f32::Vec2 { x: 0.1, y: 0.1 }, is_static: false } ).unwrap();
 
         // Create gun to demonstrate ChildOf component
         let gun = world.create_entity();
         world.add_component(&gun, component::ChildOf { parent: player }).unwrap();
         world.add_component(&gun, component::Transform { position: f32::Vec2 { x: 0.05, y: 0.0 } }).unwrap();
         world.add_component(&gun, component::Sprite { atlas_texture_index: 29 }).unwrap();
-        world.add_component(&gun, component::ShootsBullet { bullet_speed: 0.1, is_active: true }).unwrap();
+        world.add_component(&gun, component::ShootsBullet { bullet_speed: 0.01, is_active: true }).unwrap();
 
         // Create enemy
         let enemy = world.create_entity();
         world.add_component(&enemy, component::Transform { position: f32::Vec2 { x: 0.5, y: 0.7 } }).unwrap();
         world.add_component(&enemy, component::Sprite { atlas_texture_index: 36 }).unwrap();
-        world.add_component(&enemy, component::EnemyControl { } ).unwrap();
+        world.add_component(&enemy, component::Enemy { } ).unwrap();
 
         Stage {
             ctx,
@@ -224,7 +236,16 @@ impl EventHandler for Stage {
         );
         apply_velocity_system(
             &mut self.world,
-        )
+        );
+        collision_detection_system(
+            &mut self.world,
+        );
+        collision_resolution_system(
+            &mut self.world,
+        );
+        collision_cleanup_system(
+            &mut self.world,
+        );
     }
 
     fn draw(&mut self) {
