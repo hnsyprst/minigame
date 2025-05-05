@@ -73,6 +73,26 @@ pub mod f32 {
         }
     }
 
+    /// Out of place element-wise vector subtraction
+    impl std::ops::Sub<Vec2> for Vec2 {
+        type Output = Vec2;
+
+        fn sub(self, rhs: Vec2) -> Vec2 {
+            Vec2 { 
+                x: self.x - rhs.x,
+                y: self.y - rhs.y,
+            }
+        }
+    }
+
+    /// In place element-wise vector subtraction
+    impl std::ops::SubAssign<Vec2> for Vec2 {
+        fn sub_assign(&mut self, rhs: Vec2) {
+            self.x -= rhs.x;
+            self.y -= rhs.y;
+        }
+    }
+
     /// Out of place element-wise vector multiplication
     impl std::ops::Mul<Vec2> for Vec2 {
         type Output = Vec2;

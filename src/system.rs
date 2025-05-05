@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use miniquad::{date, window, Bindings, BufferSource, KeyCode, Pipeline, RenderingBackend, UniformsSource};
 
-use crate::{bundle::{BulletBundle}, component::{ChildOf, EnemyControl, PlayerControl, ShootsBullet, Sprite, TextureAtlas, TileMap, Transform}, ecs::{Entity, World}, linalg::{f32, Vector}, shader};
+use crate::{bundle::BulletBundle, component::{ChildOf, EnemyControl, PlayerControl, ShootsBullet, Sprite, TextureAtlas, TileMap, Transform, Velocity}, ecs::{Entity, World}, linalg::{f32, Vector}, shader};
 
 pub fn player_movement_system(
     world: &mut World,
@@ -33,26 +33,39 @@ pub fn player_movement_system(
     }
 }
 
+pub fn screen_to_world(
+    screen_vec: &f32::Vec2,
+) -> f32::Vec2 {
+    let (screen_width, screen_height) = miniquad::window::screen_size();
+    f32::Vec2 {
+        x: (screen_vec.x - screen_width / 2.0) / screen_width * 2.0,
+        y: (screen_height / 2.0 - screen_vec.y) / screen_height * 2.0,
+    }
+}
+
 pub fn shoot_gun_system(
     world: &mut World,
     mouse_position: &f32::Vec2,
     pressed_keys: &HashSet<KeyCode>,
 ) {
     // TODO: Change to mouse click
-    if pressed_keys.contains(&KeyCode::E) {
+    if pressed_keys.contains(&KeyCode::Space) {
         let shoot_data: Vec<(f32::Vec2, f32::Vec2)> = world.query::<(&ShootsBullet, &Transform)>()
             .map(| (entity, (shoots_bullet, transform)) | {
                 let world_position = compute_world_transform(world, &entity, &transform);
-                let vel = world_position.normalize() * shoots_bullet.bullet_speed;
-                (vel, world_position)
+                let velocity_vec = (screen_to_world(mouse_position) - world_position).normalize() * shoots_bullet.bullet_speed;
+                (velocity_vec, world_position)
             })
             .collect();
 
-        for (vel, position) in shoot_data {
+        for (velocity_vec, position) in shoot_data {
             let bullet = world.create_entity();
             world.add_bundle(&bullet, BulletBundle {
                 transform: Transform {
                     position,
+                },
+                velocity: Velocity {
+                    vec: velocity_vec,
                 },
                 ..Default::default()
             });
@@ -68,6 +81,14 @@ pub fn enemy_movement_system(
         t += entity.get_id() as f64;
         transform.position.x = t.sin() as f32 * 0.5;
         transform.position.y = (t * 3.).cos() as f32 * 0.5;
+    }
+}
+
+pub fn apply_velocity_system(
+    world: &mut World,
+) {
+    for (_, (velocity, mut transform)) in world.query_mut::<(&Velocity, &Transform)>() {
+        transform.position += velocity.vec;
     }
 }
 

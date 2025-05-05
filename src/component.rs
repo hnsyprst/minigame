@@ -66,6 +66,10 @@ pub struct Transform {
     pub position: f32::Vec2,
 }
 
+pub struct Velocity {
+    pub vec: f32::Vec2,
+}
+
 // This is kind of a cop out from implementing proper hierarchical components (`Parent` and `Child`).
 // There aren't currently any objects in the game that require more than a single layer hierarchy,
 // so this will suffice (for now?)

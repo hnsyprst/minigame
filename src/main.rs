@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use miniquad::*;
 use resources::ResourceManager;
 use linalg::{f32, u32};
-use system::{enemy_movement_system, player_movement_system, render_system, shoot_gun_system};
+use system::{apply_velocity_system, enemy_movement_system, player_movement_system, render_system, shoot_gun_system};
 
 const MAX_SPRITES: usize = 1024;
 
@@ -159,6 +159,7 @@ impl Stage {
         // Set up level
         let mut world = ecs::World::new();
         world.register_component::<component::Transform>();
+        world.register_component::<component::Velocity>();
         world.register_component::<component::Sprite>();
         world.register_component::<component::PlayerControl>();
         world.register_component::<component::EnemyControl>();
@@ -213,14 +214,17 @@ impl EventHandler for Stage {
             &mut self.world,
             &self.pressed_keys,
         );
+        enemy_movement_system(
+            &mut self.world,
+        );
         shoot_gun_system(
             &mut self.world,
             &self.mouse_position,
             &self.pressed_keys,
         );
-        enemy_movement_system(
+        apply_velocity_system(
             &mut self.world,
-        );
+        )
     }
 
     fn draw(&mut self) {
@@ -257,9 +261,8 @@ impl EventHandler for Stage {
         _x: f32,
         _y: f32,
     ) {
-        let (screen_width, screen_height) = miniquad::window::screen_size();
-        self.mouse_position.x = _x / screen_width;
-        self.mouse_position.y = _y / screen_height;
+        self.mouse_position.x = _x;
+        self.mouse_position.y = _y;
     }
 }
 
